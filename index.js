@@ -22,7 +22,6 @@ const path    = require("path");
 const TOKEN     = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID || "1512928969849311272";
 const GUILD_ID  = process.env.GUILD_ID  || "1512809889666175211";
-const CHANNEL_ID= process.env.CHANNEL_ID|| "1512849401322672309";
 const PORT      = process.env.PORT       || 3000;
 
 if (!TOKEN) {
