@@ -125,3 +125,9 @@ client.login(TOKEN).catch(console.error);
 /* ERROR HANDLING GLOBALE */
 process.on("unhandledRejection", console.error);
 process.on("uncaughtException", console.error);
+client.login(TOKEN)
+    .then(() => console.log("Login Discord riuscito"))
+    .catch(err => console.error("Errore login:", err));
+client.once("ready", () => {
+    console.log(`Bot online come ${client.user.tag}`);
+});
