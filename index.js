@@ -8,7 +8,7 @@ const client = new Client({
 
 const parser = new Parser();
 
-const TOKEN = "MTUxMjkyODk2OTg0OTMxMTI3Mg.Gvm3RI.olVlHBYc7MsCW8jGYVRhvOJt6_o0d0MiEKBT30";
+const TOKEN = "MTUxMjkyODk2OTg0OTMxMTI3Mg.GmBU1A.qDNDR9a_dLs1UVgoOQjFDGfuSjZhWqICeRcgeo";
 const CLIENT_ID = "1512928969849311272";
 const GUILD_ID = "1512809889666175211";
 const CHANNEL_ID = "1512849401322672309";
