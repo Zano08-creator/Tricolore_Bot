@@ -1,4 +1,4 @@
-:::writing{variant="document" id="58127"}
+writing{variant="document" id="58127"}
 const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder } = require("discord.js");
 const Parser = require("rss-parser");
 const express = require("express");
@@ -133,4 +133,3 @@ process.on("unhandledRejection", console.error);
 process.on("uncaughtException", console.error);
 
 client.login(TOKEN);
-:::
