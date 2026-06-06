@@ -131,3 +131,9 @@ client.login(TOKEN)
 client.once("ready", () => {
     console.log(`Bot online come ${client.user.tag}`);
 });
+client.once("ready", () => {
+    console.log("Server trovati:");
+    client.guilds.cache.forEach(guild => {
+        console.log(`${guild.name} (${guild.id})`);
+    });
+});
