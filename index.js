@@ -8,8 +8,8 @@ const client = new Client({
 
 const parser = new Parser();
 
-const TOKEN = "MTUxMjgzNDUzNTEyNDEwNzMzNg.Gk5YM7.etBBrf972pqsOhVkkNL3-JqpBNtOP0QV_o7-cs";
-const CLIENT_ID = "1512866636070260826";
+const TOKEN = "MTUxMjkyODk2OTg0OTMxMTI3Mg.GMrXRK.rfpbih8bJPXzR38h_yd8TJSQzZF3lT1Fm29Jds";
+const CLIENT_ID = "1512928969849311272";
 const GUILD_ID = "1512809889666175211";
 const CHANNEL_ID = "1512849401322672309";
 
