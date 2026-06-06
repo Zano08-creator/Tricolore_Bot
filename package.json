@@ -16,3 +16,6 @@
     "rss-parser": "^3.13.0"
   }
 }
+"scripts": {
+  "start": "node index.js"
+}
