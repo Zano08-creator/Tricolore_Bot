@@ -70,7 +70,10 @@ async function registerCommands() {
 /* 🌐 SERVER PER TENERE ONLINE (IMPORTANTE PER HOSTING) */
 const app = express();
 app.get("/", (req, res) => res.send("Bot online"));
-app.listen(3000);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server avviato sulla porta ${PORT}`);
+});
 
 /* 🤖 BOT READY */
 client.once("ready", async () => {
@@ -102,9 +105,11 @@ client.on("interactionCreate", async interaction => {
     }
 });
 
-client.login(TOKEN);
+client.login(TOKEN).catch(console.error);
 const express = require("express");
 const app = express();
 
 app.get("/", (req, res) => res.send("Bot online"));
 app.listen(3000);
+process.on("unhandledRejection", console.error);
+process.on("uncaughtException", console.error);
