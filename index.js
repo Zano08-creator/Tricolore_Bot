@@ -2,7 +2,7 @@
 
 // ──────────────────────────────────────────────
 //  Tricolore News Bot  –  index.js
-//  Versione pulita e robusta
+//  Versione con supporto canali vocali
 // ──────────────────────────────────────────────
 
 const {
@@ -13,6 +13,12 @@ const {
     Routes,
     SlashCommandBuilder,
 } = require("discord.js");
+const {
+    joinVoiceChannel,
+    leaveVoiceChannel,
+    VoiceConnectionStatus,
+    getVoiceConnection,
+} = require("@discordjs/voice");
 const Parser  = require("rss-parser");
 const express = require("express");
 const fs      = require("fs");
@@ -38,7 +44,6 @@ const FEEDS = [
 ];
 
 // ── Persistenza notizie già inviate ───────────
-//    Salviamo i link su file per sopravvivere ai riavvii.
 const SENT_FILE = path.join(__dirname, "sent_news.json");
 
 function loadSentNews() {
@@ -84,6 +89,16 @@ const commands = [
                 )
         )
         .toJSON(),
+
+    new SlashCommandBuilder()
+        .setName("join")
+        .setDescription("Fa entrare il bot nel tuo canale vocale attuale")
+        .toJSON(),
+
+    new SlashCommandBuilder()
+        .setName("leave")
+        .setDescription("Fa uscire il bot dal canale vocale")
+        .toJSON(),
 ];
 
 async function registerCommands() {
@@ -92,7 +107,7 @@ async function registerCommands() {
         await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
             body: commands,
         });
-        console.log("[INFO] Comando /news registrato con successo.");
+        console.log("[INFO] Comandi /news, /join, /leave registrati con successo.");
     } catch (err) {
         console.error("[ERROR] Registrazione comandi fallita:", err.message);
     }
@@ -142,14 +157,11 @@ async function checkNews(isFirstRun = false) {
 
             sentNews.add(item.link);
 
-            // Al primo avvio segniamo le notizie già esistenti senza inviarle,
-            // così il canale non viene inondato di messaggi vecchi.
             if (isFirstRun) continue;
 
             try {
                 await channel.send({ embeds: [buildEmbed(item, feedInfo)] });
                 newCount++;
-                // Piccolo delay per rispettare il rate limit di Discord
                 await sleep(1_200);
             } catch (err) {
                 console.error("[ERROR] Invio embed fallito:", err.message);
@@ -167,52 +179,139 @@ async function checkNews(isFirstRun = false) {
 }
 
 // ── Client Discord ────────────────────────────
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildVoiceStates, // necessario per i canali vocali
+    ],
+});
 
 client.once("ready", async () => {
     console.log(`[INFO] Bot online come ${client.user.tag}`);
     await registerCommands();
-    await checkNews(true);                          // Primo giro: solo indicizzazione
-    setInterval(() => checkNews(false), 5 * 60 * 1000); // Poll ogni 5 minuti
+    await checkNews(true);
+    setInterval(() => checkNews(false), 5 * 60 * 1000);
 });
 
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
-    if (interaction.commandName !== "news") return;
 
-    await interaction.deferReply();
+    // ── /news ─────────────────────────────────
+    if (interaction.commandName === "news") {
+        await interaction.deferReply();
 
-    const categoria = interaction.options.getString("categoria") || "tutte";
-    const targetFeeds = categoria === "tutte"
-        ? FEEDS
-        : FEEDS.filter((f) => f.label.toLowerCase() === categoria);
+        const categoria = interaction.options.getString("categoria") || "tutte";
+        const targetFeeds = categoria === "tutte"
+            ? FEEDS
+            : FEEDS.filter((f) => f.label.toLowerCase() === categoria);
 
-    const embeds = [];
+        const embeds = [];
 
-    for (const feedInfo of targetFeeds) {
-        let feed;
-        try {
-            feed = await parser.parseURL(feedInfo.url);
-        } catch {
-            continue;
+        for (const feedInfo of targetFeeds) {
+            let feed;
+            try {
+                feed = await parser.parseURL(feedInfo.url);
+            } catch {
+                continue;
+            }
+
+            for (const item of feed.items.slice(0, 3)) {
+                if (!item.link) continue;
+                embeds.push(buildEmbed(item, feedInfo));
+                if (embeds.length >= 10) break;
+            }
+            if (embeds.length >= 10) break;
         }
 
-        for (const item of feed.items.slice(0, 3)) {
-            if (!item.link) continue;
-            embeds.push(buildEmbed(item, feedInfo));
-            if (embeds.length >= 10) break; // Discord max 10 embed per messaggio
+        if (embeds.length === 0) {
+            await interaction.editReply({
+                content: "⚠️ Nessuna notizia disponibile al momento.",
+            });
+            return;
         }
-        if (embeds.length >= 10) break;
-    }
 
-    if (embeds.length === 0) {
-        await interaction.editReply({
-            content: "⚠️ Nessuna notizia disponibile al momento.",
-        });
+        await interaction.editReply({ embeds });
         return;
     }
 
-    await interaction.editReply({ embeds });
+    // ── /join ─────────────────────────────────
+    if (interaction.commandName === "join") {
+        // Recupera il canale vocale in cui si trova l'utente
+        const member = interaction.guild?.members?.cache.get(interaction.user.id)
+                    ?? await interaction.guild.members.fetch(interaction.user.id);
+
+        const voiceChannel = member.voice?.channel;
+
+        if (!voiceChannel) {
+            await interaction.reply({
+                content: "❌ Devi prima entrare in un canale vocale!",
+                ephemeral: true,
+            });
+            return;
+        }
+
+        // Controlla se il bot è già connesso allo stesso canale
+        const existingConnection = getVoiceConnection(interaction.guild.id);
+        if (existingConnection) {
+            if (existingConnection.joinConfig.channelId === voiceChannel.id) {
+                await interaction.reply({
+                    content: `✅ Sono già nel canale **${voiceChannel.name}**!`,
+                    ephemeral: true,
+                });
+                return;
+            }
+            // Se è in un canale diverso, disconnetti prima
+            existingConnection.destroy();
+        }
+
+        try {
+            joinVoiceChannel({
+                channelId: voiceChannel.id,
+                guildId:   interaction.guild.id,
+                adapterCreator: interaction.guild.voiceAdapterCreator,
+                selfDeaf:  true,  // bot in modalità sordo (non ascolta nessuno)
+                selfMute:  true,  // bot in modalità muto (non trasmette audio)
+            });
+
+            console.log(`[INFO] Bot entrato nel canale vocale: ${voiceChannel.name}`);
+
+            await interaction.reply({
+                content: `🎙️ Entrato nel canale **${voiceChannel.name}**!`,
+            });
+        } catch (err) {
+            console.error("[ERROR] Impossibile entrare nel canale vocale:", err.message);
+            await interaction.reply({
+                content: "❌ Non riesco ad entrare nel canale vocale. Controlla i permessi del bot.",
+                ephemeral: true,
+            });
+        }
+        return;
+    }
+
+    // ── /leave ────────────────────────────────
+    if (interaction.commandName === "leave") {
+        const connection = getVoiceConnection(interaction.guild.id);
+
+        if (!connection) {
+            await interaction.reply({
+                content: "❌ Non sono in nessun canale vocale!",
+                ephemeral: true,
+            });
+            return;
+        }
+
+        const channelId   = connection.joinConfig.channelId;
+        const voiceChannel = interaction.guild.channels.cache.get(channelId);
+        const channelName  = voiceChannel?.name ?? "canale sconosciuto";
+
+        connection.destroy();
+        console.log(`[INFO] Bot uscito dal canale vocale: ${channelName}`);
+
+        await interaction.reply({
+            content: `👋 Uscito dal canale **${channelName}**!`,
+        });
+        return;
+    }
 });
 
 // ── Server Express (keep-alive) ───────────────
@@ -221,9 +320,9 @@ const app = express();
 app.get("/", (_req, res) => res.send("Tricolore News Bot – Online ✅"));
 app.get("/health", (_req, res) =>
     res.json({
-        status: "ok",
-        uptime: process.uptime(),
-        sentNews: sentNews.size,
+        status:    "ok",
+        uptime:    process.uptime(),
+        sentNews:  sentNews.size,
         timestamp: new Date().toISOString(),
     })
 );
