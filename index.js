@@ -2,138 +2,154 @@ const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuild
 const Parser = require("rss-parser");
 const express = require("express");
 
-const client = new Client({
-    intents: [GatewayIntentBits.Guilds]
-});
-
-const parser = new Parser();
-
-const TOKEN = "MTUxMjkyODk2OTg0OTMxMTI3Mg.GmBU1A.qDNDR9a_dLs1UVgoOQjFDGfuSjZhWqICeRcgeo";
+const TOKEN = process.env.TOKEN;
 const CLIENT_ID = "1512928969849311272";
 const GUILD_ID = "1512809889666175211";
 const CHANNEL_ID = "1512849401322672309";
 
-/* FEED RSS */
+const client = new Client({
+intents: [GatewayIntentBits.Guilds]
+});
+
+const parser = new Parser();
+
 const FEEDS = [
-    "https://www.ansa.it/sito/notizie/politica/politica_rss.xml",
-    "https://www.ansa.it/sito/notizie/economia/economia_rss.xml",
-    "https://www.ansa.it/sito/notizie/mondo/mondo_rss.xml",
-    "https://www.ansa.it/sito/notizie/cronaca/cronaca_rss.xml"
+"https://www.ansa.it/sito/notizie/politica/politica_rss.xml",
+"https://www.ansa.it/sito/notizie/economia/economia_rss.xml",
+"https://www.ansa.it/sito/notizie/mondo/mondo_rss.xml",
+"https://www.ansa.it/sito/notizie/cronaca/cronaca_rss.xml"
 ];
 
-let sent = new Set();
+const sentNews = new Set();
 
-/* NEWS CHECK */
-async function checkNews() {
-    try {
-        const channel = await client.channels.fetch(CHANNEL_ID);
-
-        for (const feed of FEEDS) {
-            try {
-                const data = await parser.parseURL(feed);
-
-                for (const item of data.items.slice(0, 5)) {
-                    if (!item.link || sent.has(item.link)) continue;
-
-                    sent.add(item.link);
-
-                    const embed = new EmbedBuilder()
-                        .setTitle(item.title || "Notizia")
-                        .setURL(item.link)
-                        .setDescription((item.contentSnippet || "").slice(0, 200))
-                        .setTimestamp();
-
-                    await channel.send({ embeds: [embed] });
-                }
-            } catch (e) {
-                console.error("Errore feed:", feed, e.message);
-            }
-        }
-    } catch (err) {
-        console.error("Errore checkNews:", err);
-    }
-}
-
-/* SLASH COMMAND */
+/* COMANDO /news */
 const commands = [
-    new SlashCommandBuilder()
-        .setName("news")
-        .setDescription("Mostra le ultime notizie")
-        .toJSON()
+new SlashCommandBuilder()
+.setName("news")
+.setDescription("Mostra le ultime notizie")
+.toJSON()
 ];
-
-const rest = new REST({ version: "10" }).setToken(TOKEN);
 
 async function registerCommands() {
-    try {
-        await rest.put(
-            Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-            { body: commands }
-        );
-    } catch (err) {
-        console.error("Errore registerCommands:", err);
-    }
+try {
+const rest = new REST({ version: "10" }).setToken(TOKEN);
+
+```
+    await rest.put(
+        Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+        { body: commands }
+    );
+
+    console.log("Comando /news registrato");
+} catch (error) {
+    console.error("Errore registrazione comandi:", error);
+}
+```
+
 }
 
-/* EXPRESS (UNA SOLA VOLTA) */
-const app = express();
-const PORT = process.env.PORT || 3000;
+/* INVIO AUTOMATICO NEWS */
+async function checkNews() {
+try {
+const channel = await client.channels.fetch(CHANNEL_ID);
 
-app.get("/", (req, res) => {
-    res.send("Bot online");
-});
+```
+    if (!channel) {
+        console.log("Canale non trovato");
+        return;
+    }
 
-app.listen(PORT, () => {
-    console.log(`Server avviato sulla porta ${PORT}`);
-});
-
-/* BOT READY */
-client.once("ready", async () => {
-    console.log(`Bot online come ${client.user.tag}`);
-
-    await registerCommands();
-
-    checkNews();
-    setInterval(checkNews, 5 * 60 * 1000);
-});
-
-/* /news COMMAND */
-client.on("interactionCreate", async interaction => {
-    if (!interaction.isChatInputCommand()) return;
-
-    if (interaction.commandName === "news") {
+    for (const feedUrl of FEEDS) {
         try {
-            const data = await parser.parseURL(FEEDS[0]);
+            const feed = await parser.parseURL(feedUrl);
 
-            const embeds = data.items.slice(0, 5).map(item =>
-                new EmbedBuilder()
+            for (const item of feed.items.slice(0, 5)) {
+                if (!item.link) continue;
+
+                if (sentNews.has(item.link)) continue;
+
+                sentNews.add(item.link);
+
+                const embed = new EmbedBuilder()
                     .setTitle(item.title || "Notizia")
                     .setURL(item.link)
-                    .setDescription((item.contentSnippet || "").slice(0, 200))
-            );
+                    .setDescription((item.contentSnippet || "Nessuna descrizione").slice(0, 300))
+                    .setFooter({ text: "Tricolore News" })
+                    .setTimestamp();
 
-            await interaction.reply({ embeds });
+                await channel.send({ embeds: [embed] });
+            }
         } catch (err) {
-            console.error(err);
-            await interaction.reply({ content: "Errore nel caricamento news", ephemeral: true });
+            console.error("Errore feed:", feedUrl);
         }
     }
+} catch (err) {
+    console.error("Errore invio news:", err);
+}
+```
+
+}
+
+/* BOT ONLINE */
+client.once("ready", async () => {
+console.log(`Bot online come ${client.user.tag}`);
+
+```
+await registerCommands();
+
+await checkNews();
+
+setInterval(checkNews, 5 * 60 * 1000);
+```
+
 });
 
-client.login(TOKEN).catch(console.error);
+/* COMANDO /news */
+client.on("interactionCreate", async interaction => {
+if (!interaction.isChatInputCommand()) return;
 
-/* ERROR HANDLING GLOBALE */
+```
+if (interaction.commandName === "news") {
+    try {
+        const feed = await parser.parseURL(FEEDS[0]);
+
+        const embeds = feed.items.slice(0, 5).map(item =>
+            new EmbedBuilder()
+                .setTitle(item.title || "Notizia")
+                .setURL(item.link)
+                .setDescription((item.contentSnippet || "Nessuna descrizione").slice(0, 300))
+        );
+
+        await interaction.reply({ embeds });
+    } catch (err) {
+        console.error(err);
+
+        await interaction.reply({
+            content: "Errore nel caricamento delle news.",
+            ephemeral: true
+        });
+    }
+}
+```
+
+});
+
+/* SERVER EXPRESS */
+const app = express();
+
+app.get("/", (req, res) => {
+res.send("Tricolore News Bot Online");
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+console.log(`Server avviato sulla porta ${PORT}`);
+});
+
+/* ERRORI GLOBALI */
 process.on("unhandledRejection", console.error);
 process.on("uncaughtException", console.error);
-client.login(TOKEN)
-    .then(() => console.log("Login Discord riuscito"))
-    .catch(err => console.error("Errore login:", err));
-client.once("ready", () => {
-    console.log(`Bot online come ${client.user.tag}`);
-});
-client.once("ready", () => {
-    console.log("Server trovati:");
-    client.guilds.cache.forEach(guild => {
-        console.log(`${guild.name} (${guild.id})`);
-    });
-});
+
+/* LOGIN */
+client.login(TOKEN);
