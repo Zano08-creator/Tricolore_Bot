@@ -21,6 +21,8 @@ const TOKEN      = process.env.TOKEN;
 const CLIENT_ID  = process.env.CLIENT_ID  || "1512928969849311272";
 const PORT       = process.env.PORT       || 3000;
 
+const GROQ_KEY = process.env.GROQ_KEY;
+
 if (!TOKEN) {
     console.error("[FATAL] TOKEN non impostato.");
     process.exit(1);
@@ -457,40 +459,39 @@ client.on("interactionCreate", async (interaction) => {
             return;
         }
 
-        // 1. Cerca risposta: DuckDuckGo → Wikipedia IT
+        // 1. Chiedi a Groq AI (gratis, 14.400 richieste/giorno)
         let risposta = null;
         try {
-            const ddgRes = await fetch(
-                `https://api.duckduckgo.com/?q=${encodeURIComponent(domanda)}&format=json&no_html=1&skip_disambig=1`,
-                { headers: { "User-Agent": "TricoloreBot/1.0" } }
-            );
-            const ddg = await ddgRes.json();
-            if (ddg.AbstractText && ddg.AbstractText.trim().length > 20) {
-                const frasi = ddg.AbstractText.match(/[^.!?]+[.!?]+/g) || [ddg.AbstractText];
-                risposta = frasi.slice(0, 3).join(" ").trim();
-            } else if (ddg.Answer && ddg.Answer.trim().length > 0) {
-                risposta = ddg.Answer.trim();
-            }
-        } catch (err) { console.warn("[CHIEDI] DuckDuckGo error:", err.message); }
-
-        if (!risposta || risposta.length < 10) {
-            try {
-                const wikiRes = await fetch(
-                    `https://it.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(domanda)}`,
-                    { headers: { "User-Agent": "TricoloreBot/1.0" } }
-                );
-                if (wikiRes.ok) {
-                    const wiki = await wikiRes.json();
-                    if (wiki.extract && wiki.extract.trim().length > 10) {
-                        const frasi = wiki.extract.match(/[^.!?]+[.!?]+/g) || [wiki.extract];
-                        risposta = frasi.slice(0, 3).join(" ").trim();
-                    }
-                }
-            } catch (err) { console.warn("[CHIEDI] Wikipedia error:", err.message); }
+            const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Content-Type":  "application/json",
+                    "Authorization": `Bearer ${GROQ_KEY}`,
+                },
+                body: JSON.stringify({
+                    model: "llama3-8b-8192",
+                    messages: [
+                        {
+                            role: "system",
+                            content: "Sei Tricolore, un assistente simpatico in un server Discord italiano. Rispondi SEMPRE in italiano, in modo chiaro e conciso (massimo 3 frasi). Non usare markdown, asterischi o formattazione speciale.",
+                        },
+                        { role: "user", content: domanda },
+                    ],
+                    max_tokens: 200,
+                    temperature: 0.7,
+                }),
+            });
+            if (!groqRes.ok) throw new Error(`Groq HTTP ${groqRes.status}`);
+            const groqData = await groqRes.json();
+            risposta = groqData.choices?.[0]?.message?.content?.trim() ?? null;
+        } catch (err) {
+            console.error("[CHIEDI] Groq error:", err.message);
+            await interaction.editReply({ content: "⚠️ Errore durante la risposta dell'IA. Riprova." });
+            return;
         }
 
-        if (!risposta || risposta.length < 5) {
-            risposta = `Non ho trovato una risposta per "${domanda}". Prova con il nome di un luogo, una persona o un argomento specifico!`;
+        if (!risposta || risposta.length < 2) {
+            risposta = "Non sono riuscito a generare una risposta. Riprova!";
         }
 
         // 2. Mostra subito la risposta scritta
