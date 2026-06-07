@@ -724,33 +724,42 @@ client.on("interactionCreate", async (interaction) => {
             return;
         }
 
-        // 1. Cerca risposta con DuckDuckGo Instant Answer API (gratis, no key)
+        // 1. Cerca risposta con DuckDuckGo + fallback Wikipedia IT
         let risposta;
         try {
-            const fetch  = require("node-fetch");
-            const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(domanda)}&format=json&no_html=1&skip_disambig=1&l=it`;
-            const ddgRes = await fetch(ddgUrl, { headers: { "User-Agent": "TricoloreBot/1.0" } });
-            if (!ddgRes.ok) throw new Error(`DuckDuckGo HTTP ${ddgRes.status}`);
-            const data = await ddgRes.json();
+            const fetch = require("node-fetch");
 
-            // Prova in ordine: AbstractText → Answer → primo RelatedTopic
-            if (data.AbstractText && data.AbstractText.trim().length > 10) {
-                risposta = data.AbstractText.trim();
-                // Tronca a max 3 frasi
-                const frasi = risposta.match(/[^.!?]+[.!?]+/g) || [risposta];
+            // Prova DuckDuckGo prima
+            const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(domanda)}&format=json&no_html=1&skip_disambig=1`;
+            const ddgRes = await fetch(ddgUrl, { headers: { "User-Agent": "TricoloreBot/1.0" } });
+            const ddg    = await ddgRes.json();
+
+            if (ddg.AbstractText && ddg.AbstractText.trim().length > 20) {
+                const frasi = ddg.AbstractText.match(/[^.!?]+[.!?]+/g) || [ddg.AbstractText];
                 risposta = frasi.slice(0, 3).join(" ").trim();
-            } else if (data.Answer && data.Answer.trim().length > 0) {
-                risposta = data.Answer.trim();
-            } else if (data.RelatedTopics && data.RelatedTopics.length > 0) {
-                const primo = data.RelatedTopics.find(t => t.Text);
-                risposta = primo ? primo.Text.trim() : null;
+            } else if (ddg.Answer && ddg.Answer.trim().length > 0) {
+                risposta = ddg.Answer.trim();
+            }
+
+            // Fallback: Wikipedia in italiano
+            if (!risposta || risposta.length < 10) {
+                const wikiUrl = `https://it.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(domanda)}`;
+                const wikiRes = await fetch(wikiUrl, { headers: { "User-Agent": "TricoloreBot/1.0" } });
+                if (wikiRes.ok) {
+                    const wiki = await wikiRes.json();
+                    if (wiki.extract && wiki.extract.trim().length > 10) {
+                        const frasi = wiki.extract.match(/[^.!?]+[.!?]+/g) || [wiki.extract];
+                        risposta = frasi.slice(0, 3).join(" ").trim();
+                    }
+                }
             }
 
             if (!risposta || risposta.length < 5) {
-                risposta = `Non ho trovato una risposta precisa per: "${domanda}". Prova a riformulare la domanda!`;
+                risposta = `Non ho trovato una risposta per "${domanda}". Prova con una domanda più specifica, come il nome di un luogo o di una persona!`;
             }
+
         } catch (err) {
-            console.error("[CHIEDI] DuckDuckGo error:", err.message);
+            console.error("[CHIEDI] Ricerca error:", err.message);
             await interaction.editReply({ content: "⚠️ Errore durante la ricerca. Riprova." });
             return;
         }
