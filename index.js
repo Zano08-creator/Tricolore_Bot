@@ -9,20 +9,9 @@ const {
     SlashCommandBuilder,
 } = require("discord.js");
 const { Shoukaku, Connectors } = require("shoukaku");
-const {
-    joinVoiceChannel,
-    createAudioPlayer,
-    createAudioResource,
-    AudioPlayerStatus,
-    VoiceConnectionStatus,
-    entersState,
-    StreamType,
-    getVoiceConnection,
-} = require("@discordjs/voice");
 const Parser  = require("rss-parser");
 const express = require("express");
 const fetch   = require("node-fetch");
-const { Readable } = require("stream");
 
 // ─────────────────────────────────────────────
 //  CONFIGURAZIONE
@@ -55,7 +44,7 @@ const FEEDS = [
 const rssParser = new Parser({ timeout: 10_000 });
 
 // ─────────────────────────────────────────────
-//  STATO MUSICALE (Lavalink/Shoukaku)
+//  STATO MUSICALE
 // ─────────────────────────────────────────────
 const musicStates = new Map();
 
@@ -86,7 +75,7 @@ function formatDuration(ms) {
 }
 
 // ─────────────────────────────────────────────
-//  PLAYER MUSICALE: avvia la prossima traccia
+//  PLAYER: avvia la prossima traccia musicale
 // ─────────────────────────────────────────────
 async function playNext(guildId) {
     const state = getMusicState(guildId);
@@ -142,144 +131,7 @@ async function playNext(guildId) {
 }
 
 // ─────────────────────────────────────────────
-//  TTS – sistema completamente separato da Lavalink
-//
-//  Usa @discordjs/voice per:
-//    1. Entrare nel canale vocale (connessione separata)
-//    2. Scaricare l'MP3 da Google TTS
-//    3. Streamarlo direttamente con ffmpeg
-//    4. Uscire alla fine (o restituire il controllo)
-//
-//  La musica Lavalink NON viene interrotta.
-//  Le due connessioni vocali coesistono sullo stesso canale
-//  (Lavalink gestisce l'audio musicale, @discordjs/voice il TTS).
-//
-//  NOTA: Discord permette una sola connessione vocale per guild.
-//  Quindi gestiamo il TTS sulla stessa connessione voice già
-//  aperta da Lavalink oppure ne apriamo una temporanea se non c'è
-//  musica in corso. Usiamo un AudioPlayer separato.
-// ─────────────────────────────────────────────
-
-// Coda TTS per guild: { text, voiceChannel }
-const ttsQueues  = new Map(); // guildId → Array
-const ttsRunning = new Map(); // guildId → boolean
-
-async function fetchTTSBuffer(text) {
-    const testo = text.replace(/[*_`~]/g, "").slice(0, 200);
-    const url   = `https://translate.google.com/translate_tts?ie=UTF-8&tl=it&client=tw-ob&q=${encodeURIComponent(testo)}`;
-    const res   = await fetch(url, {
-        timeout: 10_000,
-        headers: { "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)" },
-    });
-    if (!res.ok) throw new Error(`Google TTS HTTP ${res.status}`);
-    const buf = await res.buffer();
-    if (!buf || buf.length < 100) throw new Error("Buffer TTS vuoto");
-    return buf;
-}
-
-/**
- * Aggiunge un messaggio TTS alla coda del guild e avvia
- * l'elaborazione se non è già in corso.
- */
-function enqueueTTS(guildId, text, voiceChannelId, guildObj) {
-    if (!ttsQueues.has(guildId)) ttsQueues.set(guildId, []);
-    ttsQueues.get(guildId).push({ text, voiceChannelId, guildObj });
-    processTTSQueue(guildId);
-}
-
-async function processTTSQueue(guildId) {
-    if (ttsRunning.get(guildId)) return;
-    const queue = ttsQueues.get(guildId);
-    if (!queue || queue.length === 0) return;
-
-    ttsRunning.set(guildId, true);
-
-    while (queue.length > 0) {
-        const { text, voiceChannelId, guildObj } = queue.shift();
-        try {
-            await playTTSItem(guildId, text, voiceChannelId, guildObj);
-        } catch (err) {
-            console.error("[TTS] Errore item:", err.message);
-        }
-        // Piccola pausa tra messaggi TTS consecutivi
-        if (queue.length > 0) await new Promise(r => setTimeout(r, 400));
-    }
-
-    ttsRunning.set(guildId, false);
-}
-
-/**
- * Riproduce un singolo testo TTS nel canale vocale indicato.
- * Usa @discordjs/voice completamente separato da Shoukaku/Lavalink.
- */
-async function playTTSItem(guildId, text, voiceChannelId, guildObj) {
-    // 1. Scarica il buffer TTS
-    const buf = await fetchTTSBuffer(text);
-    console.log(`[TTS] Buffer OK: ${buf.length} bytes`);
-
-    // 2. Connessione vocale via @discordjs/voice
-    //    Se Lavalink è già connesso allo stesso canale, Discord
-    //    sostituirà il bot vocale con questa connessione; al termine
-    //    Shoukaku si riconnette automaticamente (moveOnDisconnect: true).
-    //    Se NON c'è musica in corso, è la connessione principale.
-    const connection = joinVoiceChannel({
-        channelId:      voiceChannelId,
-        guildId:        guildId,
-        adapterCreator: guildObj.voiceAdapterCreator,
-        selfDeaf:       false,
-    });
-
-    try {
-        // Aspetta che la connessione sia pronta (max 5s)
-        await entersState(connection, VoiceConnectionStatus.Ready, 5_000);
-    } catch {
-        connection.destroy();
-        throw new Error("Connessione vocale TTS non riuscita");
-    }
-
-    // 3. Crea player e resource dallo stream in memoria
-    const player  = createAudioPlayer();
-    const stream  = Readable.from(buf);
-    const resource = createAudioResource(stream, {
-        inputType: StreamType.Arbitrary, // ffmpeg decoderà l'MP3
-    });
-
-    connection.subscribe(player);
-    player.play(resource);
-
-    // 4. Aspetta la fine della riproduzione
-    await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            player.stop(true);
-            resolve();
-        }, 60_000); // safety: max 60s
-
-        player.once(AudioPlayerStatus.Idle, () => {
-            clearTimeout(timeout);
-            resolve();
-        });
-        player.once("error", (err) => {
-            clearTimeout(timeout);
-            console.error("[TTS] Player error:", err.message);
-            resolve(); // non bloccare la coda
-        });
-    });
-
-    // 5. Distruggi la connessione TTS
-    //    Se c'era musica in riproduzione con Lavalink, Shoukaku
-    //    tenterà di riconnettersi grazie a moveOnDisconnect: true.
-    connection.destroy();
-    console.log("[TTS] Fine riproduzione, connessione distrutta.");
-
-    // 6. Piccola attesa per dare tempo a Shoukaku di riconnettersi
-    const musicState = getMusicState(guildId);
-    if (musicState.isPlaying && musicState.player && !musicState.player.destroyed) {
-        await new Promise(r => setTimeout(r, 1_500));
-    }
-}
-
-// ─────────────────────────────────────────────
-//  AI: Groq
+//  AI: Groq (solo risposta scritta)
 // ─────────────────────────────────────────────
 const GROQ_KEY = process.env.GROQ_KEY;
 
@@ -312,7 +164,6 @@ async function askAI(domanda) {
         const data     = await res.json();
         const risposta = data?.choices?.[0]?.message?.content?.trim();
         if (!risposta) throw new Error("Risposta vuota");
-        console.log("[AI] Risposta Groq OK.");
         return risposta;
     } catch (err) {
         console.error("[AI] Groq fallito:", err.message);
@@ -427,9 +278,9 @@ const commands = [
              )
         ).toJSON(),
 
-    // AI
+    // AI (solo testo)
     new SlashCommandBuilder()
-        .setName("chiedi").setDescription("Fai una domanda all'AI (risponde in chat e a voce)")
+        .setName("chiedi").setDescription("Fai una domanda all'AI")
         .addStringOption(o => o.setName("domanda").setDescription("La tua domanda").setRequired(true))
         .toJSON(),
 ];
@@ -438,10 +289,7 @@ const commands = [
 //  CLIENT & SHOUKAKU
 // ─────────────────────────────────────────────
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildVoiceStates,
-    ],
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
 });
 
 const shoukaku = new Shoukaku(
@@ -590,7 +438,7 @@ client.on("interactionCreate", async (interaction) => {
                         .setTitle(t0.info.title.slice(0, 256)).setURL(t0.info.uri)
                         .setThumbnail(t0.info.artworkUrl ?? null)
                         .addFields(
-                            { name: "⏱ Durata",   value: formatDuration(t0.info.length), inline: true },
+                            { name: "⏱ Durata",    value: formatDuration(t0.info.length), inline: true },
                             { name: "📋 Posizione", value: `#${state.queue.length}`,       inline: true },
                         )
                         .setFooter({ text: "Tricolore Music" }).setTimestamp()
@@ -623,8 +471,6 @@ client.on("interactionCreate", async (interaction) => {
         state.isPlaying = false;
         try { await state.player?.stopTrack(); } catch {}
         state.current = null;
-        // Svuota anche la coda TTS
-        if (ttsQueues.has(guild.id)) ttsQueues.get(guild.id).length = 0;
         await interaction.reply("⏹️ Riproduzione fermata e coda svuotata.");
         return;
     }
@@ -686,9 +532,9 @@ client.on("interactionCreate", async (interaction) => {
             new EmbedBuilder().setColor(0x1db954).setTitle("🎶 Coda musicale")
                 .setDescription(lines.join("\n").slice(0, 4096))
                 .addFields(
-                    { name: "🔁 Loop",    value: state.loop,                 inline: true },
-                    { name: "🔀 Shuffle", value: state.shuffle ? "✅":"❌",  inline: true },
-                    { name: "🔊 Volume",  value: `${state.volume}%`,         inline: true },
+                    { name: "🔁 Loop",    value: state.loop,                inline: true },
+                    { name: "🔀 Shuffle", value: state.shuffle ? "✅":"❌", inline: true },
+                    { name: "🔊 Volume",  value: `${state.volume}%`,        inline: true },
                 )
                 .setFooter({ text: `${state.queue.length} brani in attesa · Tricolore Music` }).setTimestamp()
         ]});
@@ -726,34 +572,15 @@ client.on("interactionCreate", async (interaction) => {
     if (commandName === "chiedi") {
         const domanda = interaction.options.getString("domanda", true);
         await interaction.deferReply();
-
-        // 1. Ottieni risposta AI
         const risposta = await askAI(domanda) ?? "Non sono riuscito a rispondere, riprova tra poco!";
-
-        // 2. Verifica se l'utente è in un canale vocale
-        const vc     = await getMemberVoiceChannel(interaction);
-        const inVoice = vc !== null;
-
-        // 3. Invia embed in chat
         const embed = new EmbedBuilder()
             .setColor(0x7289da)
             .setAuthor({ name: "🤖 Tricolore AI" })
             .setTitle(domanda.slice(0, 256))
             .setDescription(risposta.slice(0, 1024))
-            .setFooter({ text: inVoice
-                ? "🔊 Risposta vocale in arrivo..."
-                : "🔇 Unisciti a un canale vocale per la risposta vocale" })
+            .setFooter({ text: "Tricolore AI · Powered by Groq" })
             .setTimestamp();
         await interaction.editReply({ embeds: [embed] });
-
-        // 4. Riproduzione vocale separata (se l'utente è in voice)
-        if (inVoice) {
-            try {
-                enqueueTTS(guild.id, risposta, vc.id, guild);
-            } catch (err) {
-                console.warn("[CHIEDI] Errore TTS:", err.message);
-            }
-        }
         return;
     }
 });
@@ -761,7 +588,7 @@ client.on("interactionCreate", async (interaction) => {
 // ─────────────────────────────────────────────
 //  EXPRESS
 // ─────────────────────────────────────────────
-const app        = express();
+const app         = express();
 const SERVICE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 
 app.get("/",       (_req, res) => res.send("Tricolore Bot – Online ✅"));
