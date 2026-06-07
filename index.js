@@ -457,6 +457,21 @@ client.on("interactionCreate", async (interaction) => {
         try {
             const state = getMusicState(guild.id);
             state.textChannel = interaction.channel;
+
+            // Se c'è già una connessione residua (es. dopo riavvio), la rimuoviamo prima
+            if (state.player && !state.player.destroyed) {
+                try { await state.player.stopTrack(); } catch {}
+                shoukaku.leaveVoiceChannel(guild.id);
+                state.player    = null;
+                state.isPlaying = false;
+            } else {
+                // Prova a pulire comunque una connessione fantasma di Shoukaku
+                try { shoukaku.leaveVoiceChannel(guild.id); } catch {}
+            }
+
+            // Piccola pausa per dare tempo a Discord di registrare la disconnessione
+            await new Promise(r => setTimeout(r, 500));
+
             await ensureLavalinkPlayer(guild, voiceChannel);
             await interaction.reply({ content: `🎙️ Entrato nel canale **${voiceChannel.name}**!` });
         } catch (err) {
