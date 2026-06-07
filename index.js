@@ -770,5 +770,17 @@ app.listen(PORT, () => console.log(`[INFO] Express in ascolto sulla porta ${PORT
 process.on("unhandledRejection", (r) => console.error("[UNHANDLED REJECTION]", r));
 process.on("uncaughtException",  (e) => console.error("[UNCAUGHT EXCEPTION]", e.message));
 
+// ── Keep-alive self-ping (Render free tier) ──────
+// Pinga il proprio URL ogni 14 minuti per evitare lo sleep automatico.
+const SERVICE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+setInterval(() => {
+    const lib = SERVICE_URL.startsWith("https") ? require("https") : require("http");
+    lib.get(`${SERVICE_URL}/health`, (res) => {
+        console.log(`[KEEP-ALIVE] Ping OK - status ${res.statusCode}`);
+    }).on("error", (err) => {
+        console.warn("[KEEP-ALIVE] Ping fallito:", err.message);
+    });
+}, 14 * 60 * 1000);
+
 // ── Login ─────────────────────────────────────
 client.login(TOKEN);
