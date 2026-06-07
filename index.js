@@ -18,7 +18,6 @@ const Parser  = require("rss-parser");
 const express = require("express");
 const fs      = require("fs");
 const path    = require("path");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 const os      = require("os");
 
 // ── Configurazione ────────────────────────────
@@ -27,8 +26,6 @@ const CLIENT_ID  = process.env.CLIENT_ID  || "1512928969849311272";
 const GUILD_ID   = process.env.GUILD_ID   || "1512809889666175211";
 const CHANNEL_ID = process.env.CHANNEL_ID;
 const PORT       = process.env.PORT       || 3000;
-
-const GEMINI_KEY = process.env.GEMINI_KEY;
 
 if (!TOKEN) {
     console.error("[FATAL] TOKEN non impostato.");
@@ -727,25 +724,34 @@ client.on("interactionCreate", async (interaction) => {
             return;
         }
 
-        if (!GEMINI_KEY) {
-            await interaction.editReply({ content: "❌ `GEMINI_KEY` non configurata nelle variabili d'ambiente." });
-            return;
-        }
-
-        // 1. Chiedi a Gemini
+        // 1. Cerca risposta con DuckDuckGo Instant Answer API (gratis, no key)
         let risposta;
         try {
-            const genAI = new GoogleGenerativeAI(GEMINI_KEY);
-            const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-            const result = await model.generateContent(
-                `Sei Tricolore, un assistente vocale simpatico in un server Discord italiano. ` +
-                `Rispondi in italiano, in modo chiaro e conciso (max 3 frasi). ` +
-                `Domanda: ${domanda}`
-            );
-            risposta = result.response.text().trim();
+            const fetch  = require("node-fetch");
+            const ddgUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(domanda)}&format=json&no_html=1&skip_disambig=1&l=it`;
+            const ddgRes = await fetch(ddgUrl, { headers: { "User-Agent": "TricoloreBot/1.0" } });
+            if (!ddgRes.ok) throw new Error(`DuckDuckGo HTTP ${ddgRes.status}`);
+            const data = await ddgRes.json();
+
+            // Prova in ordine: AbstractText → Answer → primo RelatedTopic
+            if (data.AbstractText && data.AbstractText.trim().length > 10) {
+                risposta = data.AbstractText.trim();
+                // Tronca a max 3 frasi
+                const frasi = risposta.match(/[^.!?]+[.!?]+/g) || [risposta];
+                risposta = frasi.slice(0, 3).join(" ").trim();
+            } else if (data.Answer && data.Answer.trim().length > 0) {
+                risposta = data.Answer.trim();
+            } else if (data.RelatedTopics && data.RelatedTopics.length > 0) {
+                const primo = data.RelatedTopics.find(t => t.Text);
+                risposta = primo ? primo.Text.trim() : null;
+            }
+
+            if (!risposta || risposta.length < 5) {
+                risposta = `Non ho trovato una risposta precisa per: "${domanda}". Prova a riformulare la domanda!`;
+            }
         } catch (err) {
-            console.error("[CHIEDI] Gemini error:", err.message);
-            await interaction.editReply({ content: "⚠️ Errore durante la risposta dell'IA. Riprova." });
+            console.error("[CHIEDI] DuckDuckGo error:", err.message);
+            await interaction.editReply({ content: "⚠️ Errore durante la ricerca. Riprova." });
             return;
         }
 
