@@ -15,7 +15,6 @@
     "shoukaku": "^4.0.1",
     "express": "^4.21.2",
     "sodium-native": "^4.3.2",
-    "@google/generative-ai": "^0.21.0",
     "node-fetch": "^2.7.0",
     "rss-parser": "^3.13.0"
   }
