@@ -224,12 +224,36 @@ async function playNext(guildId) {
 }
 
 // ─────────────────────────────────────────────
-//  TTS: StreamElements (URL diretto, no API key)
+//  TTS: proxy in-memory
+//  1. Il bot scarica l'MP3 da StreamElements
+//  2. Lo tiene in memoria con un ID univoco
+//  3. Express lo serve su GET /tts/:id
+//  4. Lavalink carica da http://localhost:PORT/tts/:id
 // ─────────────────────────────────────────────
-function buildTTSUrl(text) {
-    const testo = text.replace(/[*_`~]/g, "").slice(0, 300);
-    return `https://api.streamelements.com/kappa/v2/speech?voice=Giorgio&text=${encodeURIComponent(testo)}`;
+const ttsBuffers = new Map(); // id → Buffer
+
+function makeTTSId() {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+async function fetchTTSBuffer(text) {
+    const testo = text.replace(/[*_`~]/g, "").slice(0, 300);
+    const url   = `https://api.streamelements.com/kappa/v2/speech?voice=Giorgio&text=${encodeURIComponent(testo)}`;
+    const res   = await fetch(url, { timeout: 10_000 });
+    if (!res.ok) throw new Error(`StreamElements HTTP ${res.status}`);
+    const buf = await res.buffer();
+    if (!buf || buf.length < 100) throw new Error("Buffer TTS vuoto o troppo piccolo");
+    return buf;
+}
+
+// Pulizia automatica: rimuovi i buffer più vecchi di 5 minuti
+setInterval(() => {
+    const now = Date.now();
+    for (const [id] of ttsBuffers) {
+        const ts = parseInt(id.split("-")[0], 10);
+        if (now - ts > 5 * 60 * 1000) ttsBuffers.delete(id);
+    }
+}, 60_000);
 
 // ─────────────────────────────────────────────
 //  AI: Groq
@@ -720,26 +744,40 @@ client.on("interactionCreate", async (interaction) => {
 
         if (!inVoice) return;
 
-        // 4. Risolvi TTS su Lavalink e aggiungi alla ttsQueue separata
-        const ttsUrl = buildTTSUrl(risposta);
-        const node   = getAvailableNode();
+        // 4. Scarica TTS in memoria, servilo via proxy locale, passalo a Lavalink
+        const node = getAvailableNode();
         if (!node) return;
 
         try {
+            // a) Scarica l'MP3 da StreamElements sul bot
+            const ttsBuf = await fetchTTSBuffer(risposta);
+
+            // b) Salva in memoria con ID univoco
+            const ttsId  = makeTTSId();
+            ttsBuffers.set(ttsId, ttsBuf);
+            console.log(`[TTS] Buffer salvato (${ttsBuf.length} bytes), id=${ttsId}`);
+
+            // c) URL locale che Lavalink può raggiungere
+            //    Su Render: RENDER_EXTERNAL_URL è pubblico → Lavalink esterno lo vede
+            //    In locale: usa localhost
+            const ttsUrl = `${SERVICE_URL}/tts/${ttsId}`;
+            console.log("[TTS] URL proxy:", ttsUrl);
+
+            // d) Risolvi su Lavalink
             const resolved  = await node.rest.resolve(ttsUrl);
             const rawTracks = resolved?.loadType === "track"
                 ? [resolved.data]
                 : (resolved?.data?.tracks ?? []);
-            if (!rawTracks.length) throw new Error("Nessuna traccia TTS");
+            if (!rawTracks.length) throw new Error("Lavalink non ha trovato tracce nell'URL proxy");
 
-            // Aggiungi alla coda TTS (non alla coda musicale)
+            // e) Aggiungi alla coda TTS separata
             state.ttsQueue.push({
                 encoded: rawTracks[0].encoded,
                 title:   `🤖 ${domanda.slice(0, 50)}`,
             });
             console.log("[TTS] Aggiunto alla ttsQueue. Lunghezza:", state.ttsQueue.length);
 
-            // Avvia il processo TTS (si mette in coda se già attivo)
+            // f) Avvia il processo TTS (si accoda se già attivo)
             processTTSQueue(guild.id);
         } catch (err) {
             console.warn("[CHIEDI] Audio error:", err.message);
@@ -755,6 +793,16 @@ const app        = express();
 const SERVICE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 
 app.get("/", (_req, res) => res.send("Tricolore Bot – Online ✅"));
+
+// Serve i buffer TTS in memoria a Lavalink
+app.get("/tts/:id", (req, res) => {
+    const buf = ttsBuffers.get(req.params.id);
+    if (!buf) { res.status(404).send("Not found"); return; }
+    res.setHeader("Content-Type",   "audio/mpeg");
+    res.setHeader("Content-Length", buf.length);
+    res.setHeader("Accept-Ranges",  "bytes");
+    res.end(buf);
+});
 
 app.get("/health", (_req, res) => res.json({
     status:    "ok",
