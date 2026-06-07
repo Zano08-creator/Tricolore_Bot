@@ -11,9 +11,6 @@ const {
 const { Shoukaku, Connectors } = require("shoukaku");
 const Parser  = require("rss-parser");
 const express = require("express");
-const fs      = require("fs");
-const path    = require("path");
-const os      = require("os");
 const fetch   = require("node-fetch");
 
 // ─────────────────────────────────────────────
@@ -26,13 +23,13 @@ const PORT      = process.env.PORT      || 3000;
 if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 
 // ─────────────────────────────────────────────
-//  LAVALINK NODES (pubblici e gratuiti)
+//  LAVALINK NODES
 // ─────────────────────────────────────────────
 const LAVALINK_NODES = [
-    { name: "serenetia", url: "lavalinkv4.serenetia.com",      auth: "https://seretia.link/discord",  port: 443, secure: true },
-    { name: "jirayu",    url: "lavalink.jirayu.net",           auth: "youshallnotpass",               port: 443, secure: true },
-    { name: "millohost", url: "lava-v4.millohost.my.id",       auth: "https://discord.gg/mjS5J2K3ep", port: 443, secure: true },
-    { name: "trinium",   url: "lavalink-v4.triniumhost.com",   auth: "free",                          port: 443, secure: true },
+    { name: "serenetia", url: "lavalinkv4.serenetia.com",    auth: "https://seretia.link/discord",  port: 443, secure: true },
+    { name: "jirayu",    url: "lavalink.jirayu.net",         auth: "youshallnotpass",               port: 443, secure: true },
+    { name: "millohost", url: "lava-v4.millohost.my.id",     auth: "https://discord.gg/mjS5J2K3ep", port: 443, secure: true },
+    { name: "trinium",   url: "lavalink-v4.triniumhost.com", auth: "free",                          port: 443, secure: true },
 ];
 
 // ─────────────────────────────────────────────
@@ -48,15 +45,28 @@ const rssParser = new Parser({ timeout: 10_000 });
 
 // ─────────────────────────────────────────────
 //  STATO MUSICALE
+//
+//  ttsQueue  → coda separata per le tracce TTS
+//  ttsActive → true mentre una traccia TTS è in play
+//              (la musica è pausata)
 // ─────────────────────────────────────────────
 const musicStates = new Map();
 
 function getMusicState(guildId) {
     if (!musicStates.has(guildId)) {
         musicStates.set(guildId, {
-            queue: [], player: null, current: null,
-            volume: 100, loop: "none", shuffle: false,
-            textChannel: null, isPlaying: false,
+            // musica
+            queue:      [],
+            player:     null,
+            current:    null,
+            volume:     100,
+            loop:       "none",
+            shuffle:    false,
+            textChannel: null,
+            isPlaying:  false,
+            // TTS
+            ttsQueue:   [],
+            ttsActive:  false,
         });
     }
     return musicStates.get(guildId);
@@ -64,25 +74,110 @@ function getMusicState(guildId) {
 
 function formatDuration(ms) {
     if (!ms || ms <= 0) return "🔴 Live";
-    const s = Math.floor(ms / 1000);
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
+    const s   = Math.floor(ms / 1000);
+    const h   = Math.floor(s / 3600);
+    const m   = Math.floor((s % 3600) / 60);
     const sec = s % 60;
     if (h > 0) return `${h}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
     return `${m}:${String(sec).padStart(2,"0")}`;
 }
 
 // ─────────────────────────────────────────────
-//  PLAYER: avvia la prossima traccia
+//  TTS QUEUE MANAGER
+//  Gestisce la coda TTS separata:
+//    1. pausa la musica corrente
+//    2. riproduce ogni TTS in sequenza
+//    3. al termine riprende la musica
+// ─────────────────────────────────────────────
+async function processTTSQueue(guildId) {
+    const state = getMusicState(guildId);
+    if (state.ttsActive || state.ttsQueue.length === 0) return;
+
+    state.ttsActive = true;
+
+    // Pausa musica (se in riproduzione)
+    const wasMusicPlaying = state.isPlaying && state.player && !state.player.paused;
+    if (wasMusicPlaying) {
+        try { await state.player.setPaused(true); } catch {}
+        console.log("[TTS] Musica in pausa per TTS.");
+    }
+
+    // Riproduci ogni messaggio TTS in sequenza
+    while (state.ttsQueue.length > 0) {
+        const ttsTrack = state.ttsQueue.shift();
+        if (!state.player || state.player.destroyed) break;
+
+        await new Promise(async (resolve) => {
+            const onEnd       = () => { cleanup(); resolve(); };
+            const onException = (data) => {
+                console.warn("[TTS] Exception:", data?.exception?.message ?? data);
+                cleanup();
+                resolve();
+            };
+            const onStuck = () => { cleanup(); resolve(); };
+
+            function cleanup() {
+                state.player.off("end",       onEnd);
+                state.player.off("exception", onException);
+                state.player.off("stuck",     onStuck);
+            }
+
+            state.player.once("end",       onEnd);
+            state.player.once("exception", onException);
+            state.player.once("stuck",     onStuck);
+
+            try {
+                await state.player.playTrack({ track: { encoded: ttsTrack.encoded } });
+                await state.player.setGlobalVolume(state.volume);
+                console.log("[TTS] Riproduzione:", ttsTrack.title);
+            } catch (err) {
+                console.error("[TTS] playTrack error:", err.message);
+                cleanup();
+                resolve();
+            }
+        });
+
+        // Piccola pausa tra messaggi TTS consecutivi
+        if (state.ttsQueue.length > 0) {
+            await new Promise(r => setTimeout(r, 300));
+        }
+    }
+
+    state.ttsActive = false;
+
+    // Riprendi musica se era in riproduzione
+    if (wasMusicPlaying && state.player && !state.player.destroyed) {
+        if (state.current) {
+            try {
+                await state.player.setPaused(false);
+                console.log("[TTS] Musica ripresa.");
+            } catch {}
+        } else {
+            // La coda musicale era finita mentre il TTS girava
+            playNext(guildId);
+        }
+    } else if (!state.isPlaying && state.queue.length > 0 && state.player && !state.player.destroyed) {
+        // C'era roba in coda ma non si stava suonando
+        playNext(guildId);
+    }
+}
+
+// ─────────────────────────────────────────────
+//  PLAYER: avvia la prossima traccia musicale
+//  (non viene chiamata mai per le tracce TTS)
 // ─────────────────────────────────────────────
 async function playNext(guildId) {
     const state = getMusicState(guildId);
+
+    // Non interrompere il TTS in corso
+    if (state.ttsActive) return;
+
     const { queue, loop, shuffle, player } = state;
 
     if (!player || player.destroyed) { state.isPlaying = false; return; }
 
     if (queue.length === 0 && loop !== "track") {
-        state.current = null;
+        state.current   = null;
         state.isPlaying = false;
         state.textChannel?.send("✅ **Coda terminata.** Aggiungi canzoni con `/play`!").catch(() => {});
         return;
@@ -104,9 +199,6 @@ async function playNext(guildId) {
         await player.playTrack({ track: { encoded: track.encoded } });
         await player.setGlobalVolume(state.volume);
 
-        // Le tracce TTS non mostrano embed
-        if (track.isTTS) return;
-
         const embed = new EmbedBuilder()
             .setColor(0x1db954)
             .setAuthor({ name: "▶  Ora in riproduzione" })
@@ -126,23 +218,21 @@ async function playNext(guildId) {
         state.textChannel?.send({ embeds: [embed] }).catch(() => {});
     } catch (err) {
         console.error("[MUSIC] Errore playTrack:", err.message);
-            state.isPlaying = false;
+        state.isPlaying = false;
         playNext(guildId);
     }
 }
 
 // ─────────────────────────────────────────────
-//  TTS: StreamElements (URL diretto, nessuna chiave)
-//  Lavalink carica l'URL direttamente senza passare per Render
+//  TTS: StreamElements (URL diretto, no API key)
 // ─────────────────────────────────────────────
 function buildTTSUrl(text) {
-    // StreamElements supporta voci italiane: Giorgio (m), Bianca (f)
     const testo = text.replace(/[*_`~]/g, "").slice(0, 300);
     return `https://api.streamelements.com/kappa/v2/speech?voice=Giorgio&text=${encodeURIComponent(testo)}`;
 }
 
 // ─────────────────────────────────────────────
-//  AI: Groq (gratuito, 14.400 req/giorno)
+//  AI: Groq
 // ─────────────────────────────────────────────
 const GROQ_KEY = process.env.GROQ_KEY;
 
@@ -152,10 +242,7 @@ const SYSTEM_PROMPT =
     "Non usare markdown, asterischi o simboli speciali.";
 
 async function askAI(domanda) {
-    if (!GROQ_KEY) {
-        console.error("[AI] GROQ_KEY non impostata!");
-        return null;
-    }
+    if (!GROQ_KEY) { console.error("[AI] GROQ_KEY non impostata!"); return null; }
     try {
         const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
@@ -164,27 +251,28 @@ async function askAI(domanda) {
                 "Authorization": `Bearer ${GROQ_KEY}`,
             },
             body: JSON.stringify({
-                model: "llama-3.1-8b-instant",
-                messages: [
+                model:       "llama-3.1-8b-instant",
+                messages:    [
                     { role: "system", content: SYSTEM_PROMPT },
                     { role: "user",   content: domanda },
                 ],
-                max_tokens: 200,
+                max_tokens:  200,
                 temperature: 0.7,
             }),
             timeout: 15_000,
         });
         if (!res.ok) throw new Error(`Groq HTTP ${res.status}`);
-        const data = await res.json();
+        const data     = await res.json();
         const risposta = data?.choices?.[0]?.message?.content?.trim();
         if (!risposta) throw new Error("Risposta vuota");
-        console.log("[AI] Risposta da Groq OK.");
+        console.log("[AI] Risposta Groq OK.");
         return risposta;
     } catch (err) {
         console.error("[AI] Groq fallito:", err.message);
         return null;
     }
 }
+
 // ─────────────────────────────────────────────
 //  HELPERS
 // ─────────────────────────────────────────────
@@ -206,24 +294,47 @@ async function getMemberVoiceChannel(interaction) {
 async function ensurePlayer(guild, voiceChannel) {
     const state = getMusicState(guild.id);
     if (state.player && !state.player.destroyed) return state.player;
-    if (!getAvailableNode()) throw new Error("Nessun nodo Lavalink disponibile. Riprova tra qualche secondo.");
+    if (!getAvailableNode())
+        throw new Error("Nessun nodo Lavalink disponibile. Riprova tra qualche secondo.");
+
     const player = await shoukaku.joinVoiceChannel({
-        guildId: guild.id, channelId: voiceChannel.id, shardId: guild.shardId ?? 0,
+        guildId:   guild.id,
+        channelId: voiceChannel.id,
+        shardId:   guild.shardId ?? 0,
     });
+
+    // ── Evento "end": distingui musica da TTS ──
     player.on("end", () => {
         const s = getMusicState(guild.id);
+        // Se era TTS, processTTSQueue gestisce tutto
+        if (s.ttsActive) return;
         s.isPlaying = false;
         playNext(guild.id);
     });
+
     player.on("exception", (data) => {
-        console.error("[LAVALINK] Eccezione:", data?.exception?.message ?? data);
         const s = getMusicState(guild.id);
+        console.error("[LAVALINK] Eccezione:", data?.exception?.message ?? data);
+        if (s.ttsActive) return; // gestita da processTTSQueue
         s.isPlaying = false;
         s.textChannel?.send("⚠️ Errore riproduzione. Salto alla prossima...").catch(() => {});
         playNext(guild.id);
     });
-    player.on("stuck",  () => { getMusicState(guild.id).isPlaying = false; playNext(guild.id); });
-    player.on("closed", () => { const s = getMusicState(guild.id); s.player = null; s.isPlaying = false; });
+
+    player.on("stuck", () => {
+        const s = getMusicState(guild.id);
+        if (s.ttsActive) return;
+        s.isPlaying = false;
+        playNext(guild.id);
+    });
+
+    player.on("closed", () => {
+        const s = getMusicState(guild.id);
+        s.player    = null;
+        s.isPlaying = false;
+        s.ttsActive = false;
+    });
+
     state.player = player;
     return player;
 }
@@ -292,12 +403,18 @@ const client = new Client({
 const shoukaku = new Shoukaku(
     new Connectors.DiscordJS(client),
     LAVALINK_NODES,
-    { moveOnDisconnect: true, resumable: false, reconnectTries: 5, reconnectInterval: 5, restTimeout: 15000 }
+    {
+        moveOnDisconnect: true,
+        resumable:        false,
+        reconnectTries:   5,
+        reconnectInterval: 5,
+        restTimeout:      15000,
+    }
 );
 
-shoukaku.on("ready",      n    => console.log(`[LAVALINK] Connesso: ${n}`));
-shoukaku.on("error",      (n,e)=> console.error(`[LAVALINK] Errore ${n}:`, e?.message));
-shoukaku.on("disconnect", n    => console.warn(`[LAVALINK] Disconnesso: ${n}`));
+shoukaku.on("ready",      n     => console.log(`[LAVALINK] Connesso: ${n}`));
+shoukaku.on("error",      (n,e) => console.error(`[LAVALINK] Errore ${n}:`, e?.message));
+shoukaku.on("disconnect", n     => console.warn(`[LAVALINK] Disconnesso: ${n}`));
 
 client.once("ready", async () => {
     console.log(`[BOT] Online come ${client.user.tag}`);
@@ -316,7 +433,7 @@ client.on("interactionCreate", async (interaction) => {
     // ── /news ──────────────────────────────────
     if (commandName === "news") {
         await interaction.deferReply();
-        const cat = interaction.options.getString("categoria") || "tutte";
+        const cat   = interaction.options.getString("categoria") || "tutte";
         const feeds = cat === "tutte" ? FEEDS : FEEDS.filter(f => f.label.toLowerCase() === cat);
         const embeds = [];
         for (const feed of feeds) {
@@ -352,7 +469,9 @@ client.on("interactionCreate", async (interaction) => {
             if (state.player && !state.player.destroyed) {
                 try { await state.player.stopTrack(); } catch {}
                 shoukaku.leaveVoiceChannel(guild.id);
-                state.player = null; state.isPlaying = false;
+                state.player    = null;
+                state.isPlaying = false;
+                state.ttsActive = false;
             }
             await new Promise(r => setTimeout(r, 500));
             await ensurePlayer(guild, vc);
@@ -388,26 +507,33 @@ client.on("interactionCreate", async (interaction) => {
             await ensurePlayer(guild, vc);
             const node = getAvailableNode();
             if (!node) { await interaction.editReply("❌ Nessun nodo audio disponibile."); return; }
+
             const search = /^https?:\/\//.test(query) ? query : `ytsearch:${query}`;
             const result = await node.rest.resolve(search).catch(() => null);
             if (!result?.data) { await interaction.editReply(`⚠️ Nessun risultato per: **${query}**`); return; }
+
             let tracks = [];
             if (result.loadType === "track")    tracks = [result.data];
             if (result.loadType === "search")   tracks = result.data.slice(0, 1);
             if (result.loadType === "playlist") tracks = result.data.tracks ?? [];
             if (!tracks.length) { await interaction.editReply(`⚠️ Nessun risultato per: **${query}**`); return; }
+
             for (const t of tracks) {
                 state.queue.push({
-                    encoded: t.encoded,
-                    title: t.info.title,
-                    uri: t.info.uri,
-                    duration: t.info.length,
-                    thumbnail: t.info.artworkUrl ?? (t.info.sourceName === "youtube"
-                        ? `https://img.youtube.com/vi/${t.info.identifier}/hqdefault.jpg` : null),
+                    encoded:     t.encoded,
+                    title:       t.info.title,
+                    uri:         t.info.uri,
+                    duration:    t.info.length,
+                    thumbnail:   t.info.artworkUrl
+                                 ?? (t.info.sourceName === "youtube"
+                                    ? `https://img.youtube.com/vi/${t.info.identifier}/hqdefault.jpg`
+                                    : null),
                     requestedBy: interaction.user.username,
                 });
             }
-            if (!state.isPlaying) {
+
+            // Non avviare la musica se TTS è in corso
+            if (!state.isPlaying && !state.ttsActive) {
                 await interaction.editReply(
                     tracks.length > 1
                         ? `🎵 Playlist aggiunta: **${tracks.length} brani**. Avvio in corso...`
@@ -437,8 +563,14 @@ client.on("interactionCreate", async (interaction) => {
     // ── /skip ──────────────────────────────────
     if (commandName === "skip") {
         const state = getMusicState(guild.id);
+        if (state.ttsActive) {
+            await interaction.reply({ content: "⏭️ Messaggio vocale saltato.", ephemeral: true });
+            // Forza il termine del TTS corrente
+            try { await state.player.stopTrack(); } catch {}
+            return;
+        }
         if (!state.current) { await interaction.reply({ content: "❌ Nessuna canzone in riproduzione.", ephemeral: true }); return; }
-        const title = state.current.title;
+        const title    = state.current.title;
         const prevLoop = state.loop;
         if (state.loop === "track") state.loop = "none";
         try { await state.player.stopTrack(); } catch {}
@@ -450,7 +582,11 @@ client.on("interactionCreate", async (interaction) => {
     // ── /stop ──────────────────────────────────
     if (commandName === "stop") {
         const state = getMusicState(guild.id);
-        state.queue = []; state.loop = "none"; state.isPlaying = false;
+        state.queue     = [];
+        state.ttsQueue  = [];
+        state.loop      = "none";
+        state.isPlaying = false;
+        state.ttsActive = false;
         try { await state.player?.stopTrack(); } catch {}
         state.current = null;
         await interaction.reply("⏹️ Riproduzione fermata e coda svuotata.");
@@ -460,6 +596,7 @@ client.on("interactionCreate", async (interaction) => {
     // ── /pause ─────────────────────────────────
     if (commandName === "pause") {
         const state = getMusicState(guild.id);
+        if (state.ttsActive) { await interaction.reply({ content: "❌ Non puoi mettere in pausa durante un TTS.", ephemeral: true }); return; }
         if (!state.player || !state.isPlaying) { await interaction.reply({ content: "❌ Nessuna canzone in riproduzione.", ephemeral: true }); return; }
         if (state.player.paused) { await interaction.reply({ content: "❌ Già in pausa.", ephemeral: true }); return; }
         await state.player.setPaused(true);
@@ -470,6 +607,7 @@ client.on("interactionCreate", async (interaction) => {
     // ── /resume ────────────────────────────────
     if (commandName === "resume") {
         const state = getMusicState(guild.id);
+        if (state.ttsActive) { await interaction.reply({ content: "❌ Attendere la fine del messaggio vocale.", ephemeral: true }); return; }
         if (!state.player?.paused) { await interaction.reply({ content: "❌ Non è in pausa.", ephemeral: true }); return; }
         await state.player.setPaused(false);
         await interaction.reply("▶️ Riproduzione ripresa!");
@@ -479,6 +617,9 @@ client.on("interactionCreate", async (interaction) => {
     // ── /nowplaying ────────────────────────────
     if (commandName === "nowplaying") {
         const state = getMusicState(guild.id);
+        if (state.ttsActive) {
+            await interaction.reply({ content: "🗣️ Il bot sta leggendo un messaggio vocale.", ephemeral: true }); return;
+        }
         if (!state.current) { await interaction.reply({ content: "❌ Nessuna canzone in riproduzione.", ephemeral: true }); return; }
         const t = state.current;
         await interaction.reply({ embeds: [
@@ -502,6 +643,7 @@ client.on("interactionCreate", async (interaction) => {
         const state = getMusicState(guild.id);
         if (!state.current && !state.queue.length) { await interaction.reply({ content: "📭 La coda è vuota.", ephemeral: true }); return; }
         const lines = [];
+        if (state.ttsActive) lines.push("🗣️ *Il bot sta leggendo un messaggio vocale...*\n");
         if (state.current) lines.push(`**▶ In riproduzione:**\n[${state.current.title}](${state.current.uri}) · ${formatDuration(state.current.duration)}\n`);
         if (state.queue.length) {
             lines.push("**📋 Coda:**");
@@ -525,7 +667,7 @@ client.on("interactionCreate", async (interaction) => {
 
     // ── /volume ────────────────────────────────
     if (commandName === "volume") {
-        const val = interaction.options.getInteger("valore", true);
+        const val   = interaction.options.getInteger("valore", true);
         const state = getMusicState(guild.id);
         state.volume = val;
         try { await state.player?.setGlobalVolume(val); } catch {}
@@ -544,7 +686,7 @@ client.on("interactionCreate", async (interaction) => {
 
     // ── /shuffle ───────────────────────────────
     if (commandName === "shuffle") {
-        const state = getMusicState(guild.id);
+        const state   = getMusicState(guild.id);
         state.shuffle = !state.shuffle;
         await interaction.reply(state.shuffle ? "🔀 Shuffle **attivato**!" : "➡️ Shuffle **disattivato**.");
         return;
@@ -555,50 +697,50 @@ client.on("interactionCreate", async (interaction) => {
         const domanda = interaction.options.getString("domanda", true);
         await interaction.deferReply();
 
-        // 1. Risposta AI
-        const risposta = await askAI(domanda) ?? "Non sono riuscito a rispondere, riprova tra poco!";
+        // 1. Risposta AI (parallelo all'embed)
+        const [risposta] = await Promise.all([
+            askAI(domanda).then(r => r ?? "Non sono riuscito a rispondere, riprova tra poco!"),
+        ]);
 
-        // 2. Embed scritto (arriva subito)
-        const state = getMusicState(guild.id);
+        // 2. Stato corrente
+        const state  = getMusicState(guild.id);
         const inVoice = state.player && !state.player.destroyed;
 
+        // 3. Embed scritto
         const embed = new EmbedBuilder()
             .setColor(0x7289da)
             .setAuthor({ name: "🤖 Tricolore AI" })
             .setTitle(domanda.slice(0, 256))
             .setDescription(risposta.slice(0, 1024))
-            .setFooter({ text: inVoice ? "🔊 Risposta vocale in arrivo..." : "🔇 Unisciti a un canale vocale e usa /join per la risposta vocale" })
+            .setFooter({ text: inVoice
+                ? "🔊 Risposta vocale in arrivo..."
+                : "🔇 Unisciti a un canale vocale e usa /join per la risposta vocale" })
             .setTimestamp();
         await interaction.editReply({ embeds: [embed] });
 
-        // 3. Se non è in un canale vocale, ci fermiamo qui
         if (!inVoice) return;
 
-        // 4. Costruisci URL TTS diretto (StreamElements, nessun file temporaneo)
+        // 4. Risolvi TTS su Lavalink e aggiungi alla ttsQueue separata
         const ttsUrl = buildTTSUrl(risposta);
-        const node = getAvailableNode();
+        const node   = getAvailableNode();
         if (!node) return;
 
-        // 5. Passa l'URL direttamente a Lavalink
         try {
-            const resolved = await node.rest.resolve(ttsUrl);
+            const resolved  = await node.rest.resolve(ttsUrl);
             const rawTracks = resolved?.loadType === "track"
                 ? [resolved.data]
                 : (resolved?.data?.tracks ?? []);
-            if (!rawTracks.length) throw new Error("Nessuna traccia");
+            if (!rawTracks.length) throw new Error("Nessuna traccia TTS");
 
-            const ttsTrack = {
+            // Aggiungi alla coda TTS (non alla coda musicale)
+            state.ttsQueue.push({
                 encoded: rawTracks[0].encoded,
-                title: `🤖 ${domanda.slice(0, 50)}`,
-                uri: ttsUrl, duration: 0, thumbnail: null,
-                requestedBy: "Tricolore AI",
-                isTTS: true,
-            };
+                title:   `🤖 ${domanda.slice(0, 50)}`,
+            });
+            console.log("[TTS] Aggiunto alla ttsQueue. Lunghezza:", state.ttsQueue.length);
 
-            // Metti in testa alla coda
-            state.queue.unshift(ttsTrack);
-            if (!state.isPlaying) playNext(guild.id);
-            console.log("[TTS] Traccia StreamElements aggiunta alla coda.");
+            // Avvia il processo TTS (si mette in coda se già attivo)
+            processTTSQueue(guild.id);
         } catch (err) {
             console.warn("[CHIEDI] Audio error:", err.message);
         }
@@ -607,24 +749,24 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 // ─────────────────────────────────────────────
-//  EXPRESS (serve i file TTS a Lavalink)
+//  EXPRESS
 // ─────────────────────────────────────────────
-const app = express();
+const app        = express();
+const SERVICE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 
 app.get("/", (_req, res) => res.send("Tricolore Bot – Online ✅"));
 
 app.get("/health", (_req, res) => res.json({
-    status: "ok",
-    uptime: Math.floor(process.uptime()),
-    nodes: [...shoukaku.nodes.keys()],
+    status:    "ok",
+    uptime:    Math.floor(process.uptime()),
+    nodes:     [...shoukaku.nodes.keys()],
     timestamp: new Date().toISOString(),
 }));
 
-const SERVICE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 app.listen(PORT, () => console.log(`[EXPRESS] Porta ${PORT} | URL: ${SERVICE_URL}`));
 
 // ─────────────────────────────────────────────
-//  KEEP-ALIVE (ogni 14 minuti, Render non dorme)
+//  KEEP-ALIVE (ogni 14 minuti)
 // ─────────────────────────────────────────────
 setInterval(() => {
     const lib = SERVICE_URL.startsWith("https") ? require("https") : require("http");
