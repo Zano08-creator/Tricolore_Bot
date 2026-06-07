@@ -157,36 +157,99 @@ async function generateTTS(text) {
 }
 
 // ─────────────────────────────────────────────
-//  AI: Pollinations AI (gratuito, senza chiave)
+//  AI: DuckDuckGo AI Chat (gratuito, senza chiave)
+//      Fallback: Pollinations AI
 // ─────────────────────────────────────────────
-async function askAI(domanda) {
-    try {
-        const body = {
+const SYSTEM_PROMPT =
+    "Sei Tricolore, un assistente simpatico in un server Discord italiano. " +
+    "Rispondi SEMPRE in italiano, in modo chiaro e conciso (massimo 2-3 frasi). " +
+    "Non usare markdown, asterischi o simboli speciali.";
+
+async function askDuckDuckGo(domanda) {
+    // Step 1: ottieni il token VQD
+    const statusRes = await fetch("https://duckduckgo.com/duckchat/v1/status", {
+        headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "x-vqd-accept": "1",
+        },
+        timeout: 10_000,
+    });
+    if (!statusRes.ok) throw new Error(`DDG status HTTP ${statusRes.status}`);
+    const vqd = statusRes.headers.get("x-vqd-4");
+    if (!vqd) throw new Error("Token VQD non ricevuto");
+
+    // Step 2: manda la domanda
+    const chatRes = await fetch("https://duckduckgo.com/duckchat/v1/chat", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "x-vqd-4": vqd,
+        },
+        body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "user", content: `${SYSTEM_PROMPT}\n\nDomanda: ${domanda}` },
+            ],
+        }),
+        timeout: 20_000,
+    });
+    if (!chatRes.ok) throw new Error(`DDG chat HTTP ${chatRes.status}`);
+
+    // Step 3: leggi lo stream SSE e concatena i chunk
+    const text = await chatRes.text();
+    let risposta = "";
+    for (const line of text.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        const chunk = line.slice(6).trim();
+        if (chunk === "[DONE]") break;
+        try {
+            const parsed = JSON.parse(chunk);
+            risposta += parsed?.message ?? "";
+        } catch {}
+    }
+    if (!risposta.trim()) throw new Error("Risposta vuota da DDG");
+    return risposta.trim();
+}
+
+async function askPollinations(domanda) {
+    const res = await fetch("https://text.pollinations.ai/openai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
             model: "openai",
             messages: [
-                {
-                    role: "system",
-                    content:
-                        "Sei Tricolore, un assistente simpatico in un server Discord italiano. " +
-                        "Rispondi SEMPRE in italiano, in modo chiaro e conciso (massimo 2-3 frasi). " +
-                        "Non usare markdown, asterischi o simboli speciali.",
-                },
-                { role: "user", content: domanda },
+                { role: "system", content: SYSTEM_PROMPT },
+                { role: "user",   content: domanda },
             ],
             seed: 42,
             private: true,
-        };
-        const res = await fetch("https://text.pollinations.ai/openai", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-            timeout: 20_000,
-        });
-        if (!res.ok) throw new Error(`Pollinations HTTP ${res.status}`);
-        const data = await res.json();
-        return data?.choices?.[0]?.message?.content?.trim() ?? null;
+        }),
+        timeout: 20_000,
+    });
+    if (!res.ok) throw new Error(`Pollinations HTTP ${res.status}`);
+    const data = await res.json();
+    const risposta = data?.choices?.[0]?.message?.content?.trim();
+    if (!risposta) throw new Error("Risposta vuota da Pollinations");
+    return risposta;
+}
+
+async function askAI(domanda) {
+    // Prova DuckDuckGo prima
+    try {
+        const r = await askDuckDuckGo(domanda);
+        console.log("[AI] Risposta da DuckDuckGo.");
+        return r;
     } catch (err) {
-        console.error("[AI] Errore Pollinations:", err.message);
+        console.warn("[AI] DuckDuckGo fallito:", err.message, "– provo Pollinations...");
+    }
+    // Fallback Pollinations
+    try {
+        const r = await askPollinations(domanda);
+        console.log("[AI] Risposta da Pollinations.");
+        return r;
+    } catch (err) {
+        console.error("[AI] Entrambe le API fallite:", err.message);
         return null;
     }
 }
