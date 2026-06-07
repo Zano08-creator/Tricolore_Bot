@@ -19,12 +19,14 @@ const express = require("express");
 const fs      = require("fs");
 const path    = require("path");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const gTTS    = require("gtts");
+const gTTS    = require("node-gtts");
 const os      = require("os");
 
 // ── Configurazione ────────────────────────────
 const TOKEN      = process.env.TOKEN;
 const CLIENT_ID  = process.env.CLIENT_ID  || "1512928969849311272";
+const GUILD_ID   = process.env.GUILD_ID   || "1512809889666175211";
+const CHANNEL_ID = process.env.CHANNEL_ID;
 const PORT       = process.env.PORT       || 3000;
 
 const GEMINI_KEY = process.env.GEMINI_KEY;
