@@ -237,10 +237,18 @@ function makeTTSId() {
 }
 
 async function fetchTTSBuffer(text) {
-    const testo = text.replace(/[*_`~]/g, "").slice(0, 300);
-    const url   = `https://api.streamelements.com/kappa/v2/speech?voice=Giorgio&text=${encodeURIComponent(testo)}`;
-    const res   = await fetch(url, { timeout: 10_000 });
-    if (!res.ok) throw new Error(`StreamElements HTTP ${res.status}`);
+    // Google Translate TTS: gratuito, no API key, voce italiana
+    // Limite: ~200 caratteri per richiesta
+    const testo = text.replace(/[*_`~]/g, "").slice(0, 200);
+    const url   = `https://translate.google.com/translate_tts?ie=UTF-8&tl=it&client=tw-ob&q=${encodeURIComponent(testo)}`;
+    const res   = await fetch(url, {
+        timeout: 10_000,
+        headers: {
+            // Senza User-Agent Google risponde 403
+            "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+        },
+    });
+    if (!res.ok) throw new Error(`Google TTS HTTP ${res.status}`);
     const buf = await res.buffer();
     if (!buf || buf.length < 100) throw new Error("Buffer TTS vuoto o troppo piccolo");
     return buf;
