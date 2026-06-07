@@ -32,34 +32,38 @@ if (!TOKEN) {
 }
 
 // ── Nodi Lavalink ─────────────────────────────
-// Usa più nodi così Shoukaku fa fallback automatico se uno è offline.
-// Puoi aggiungere il tuo nodo self-hosted qui sopra per maggiore affidabilità.
+// Nodi verificati dalla lista ufficiale (lavalink.darrennathanael.com) – aggiornata aprile 2026.
+// Se un nodo è offline, Shoukaku passa automaticamente al successivo.
 const LAVALINK_NODES = [
     {
-        name:   "lavalink1",
-        url:    "lavalink.clxud.xyz",
-        auth:   "youshallnotpass",
+        // Hosted by Amane & AjieDev – v4, SSL, uptime ~99%
+        name:   "serenetia",
+        url:    "lavalinkv4.serenetia.com",
+        auth:   "https://seretia.link/discord",
         port:   443,
         secure: true,
     },
     {
-        name:   "lavalink2",
-        url:    "lavalink.devamop.in",
-        auth:   "DevamOP",
-        port:   443,
-        secure: true,
-    },
-    {
-        name:   "lavalink3",
+        // Hosted by Jirayu – v4.0.8, SSL
+        name:   "jirayu",
         url:    "lavalink.jirayu.net",
         auth:   "youshallnotpass",
-        port:   13592,
-        secure: false,
+        port:   443,
+        secure: true,
     },
     {
-        name:   "lavalink4",
-        url:    "lava.link",
-        auth:   "dismusic",
+        // Hosted by AneFaiz / MilloHost – v4, SSL
+        name:   "millohost",
+        url:    "lava-v4.millohost.my.id",
+        auth:   "https://discord.gg/mjS5J2K3ep",
+        port:   443,
+        secure: true,
+    },
+    {
+        // Hosted by TriniumHost – v4, SSL
+        name:   "trinium",
+        url:    "lavalink-v4.triniumhost.com",
+        auth:   "free",
         port:   443,
         secure: true,
     },
