@@ -86,16 +86,7 @@ const FEEDS = [
 
 const rssParser = new Parser({ timeout: 10_000 });
 
-function buildNewsEmbed(item, feedInfo) {
-    const { EmbedBuilder } = require("discord.js");
-    return new EmbedBuilder()
-        .setColor(feedInfo.color)
-        .setTitle((item.title || "Notizia").slice(0, 256))
-        .setURL(item.link)
-        .setDescription((item.contentSnippet || "Nessuna descrizione.").slice(0, 300))
-        .setFooter({ text: `Tricolore News · ${feedInfo.label}` })
-        .setTimestamp(item.pubDate ? new Date(item.pubDate) : new Date());
-}
+
 
 // ── Mappa file TTS temporanei ─────────────────
 const ttsFiles = new Map(); // fileId → tmpFilePath
