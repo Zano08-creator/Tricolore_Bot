@@ -24,6 +24,8 @@ const os      = require("os");
 // ── Configurazione ────────────────────────────
 const TOKEN      = process.env.TOKEN;
 const CLIENT_ID  = process.env.CLIENT_ID  || "1512928969849311272";
+const GUILD_ID   = process.env.GUILD_ID   || "1512809889666175211";
+const CHANNEL_ID = process.env.CHANNEL_ID;
 const PORT       = process.env.PORT       || 3000;
 
 const GEMINI_KEY = process.env.GEMINI_KEY;
@@ -71,6 +73,9 @@ const LAVALINK_NODES = [
     },
 ];
 
+
+
+
 // ── Feed RSS ──────────────────────────────────
 const FEEDS = [
     { url: "https://www.ansa.it/sito/notizie/politica/politica_rss.xml",  label: "Politica",  color: 0x2b5ce6 },
@@ -79,30 +84,18 @@ const FEEDS = [
     { url: "https://www.ansa.it/sito/notizie/cronaca/cronaca_rss.xml",    label: "Cronaca",   color: 0xe74c3c },
 ];
 
-// ── Persistenza notizie ───────────────────────
-const SENT_FILE = path.join(__dirname, "sent_news.json");
+const rssParser = new Parser({ timeout: 10_000 });
 
-function loadSentNews() {
-    try {
-        if (fs.existsSync(SENT_FILE)) {
-            const data = JSON.parse(fs.readFileSync(SENT_FILE, "utf8"));
-            return new Set(Array.isArray(data) ? data : []);
-        }
-    } catch {
-        console.warn("[WARN] Impossibile leggere sent_news.json.");
-    }
-    return new Set();
+function buildNewsEmbed(item, feedInfo) {
+    const { EmbedBuilder } = require("discord.js");
+    return new EmbedBuilder()
+        .setColor(feedInfo.color)
+        .setTitle((item.title || "Notizia").slice(0, 256))
+        .setURL(item.link)
+        .setDescription((item.contentSnippet || "Nessuna descrizione.").slice(0, 300))
+        .setFooter({ text: `Tricolore News · ${feedInfo.label}` })
+        .setTimestamp(item.pubDate ? new Date(item.pubDate) : new Date());
 }
-
-function saveSentNews(set) {
-    try {
-        fs.writeFileSync(SENT_FILE, JSON.stringify([...set]), "utf8");
-    } catch (err) {
-        console.error("[ERROR] Impossibile salvare sent_news.json:", err.message);
-    }
-}
-
-const sentNews = loadSentNews();
 
 // ── Mappa file TTS temporanei ─────────────────
 const ttsFiles = new Map(); // fileId → tmpFilePath
@@ -203,6 +196,7 @@ async function playNext(guildId) {
 
 // ── Slash Commands ────────────────────────────
 const commands = [
+
     new SlashCommandBuilder()
         .setName("news")
         .setDescription("Mostra le ultime notizie ANSA")
@@ -280,44 +274,6 @@ function buildNewsEmbed(item, feedInfo) {
         .setDescription((item.contentSnippet || "Nessuna descrizione.").slice(0, 300))
         .setFooter({ text: `Tricolore News · ${feedInfo.label}` })
         .setTimestamp(item.pubDate ? new Date(item.pubDate) : new Date());
-}
-
-// ── Polling notizie ───────────────────────────
-const rssParser = new Parser({ timeout: 10_000 });
-
-async function checkNews(isFirstRun = false) {
-    if (!CHANNEL_ID) return;
-    let channel;
-    try {
-        channel = await client.channels.fetch(CHANNEL_ID);
-        if (!channel?.isTextBased()) return;
-    } catch (err) {
-        console.error("[ERROR] Canale non trovato:", err.message);
-        return;
-    }
-
-    let newCount = 0;
-    for (const feedInfo of FEEDS) {
-        let feed;
-        try { feed = await rssParser.parseURL(feedInfo.url); } catch { continue; }
-
-        for (const item of feed.items.slice(0, 5)) {
-            if (!item.link || sentNews.has(item.link)) continue;
-            sentNews.add(item.link);
-            if (isFirstRun) continue;
-            try {
-                await channel.send({ embeds: [buildNewsEmbed(item, feedInfo)] });
-                newCount++;
-                await sleep(1_200);
-            } catch (err) {
-                console.error("[ERROR] Invio notizia:", err.message);
-            }
-        }
-    }
-
-    saveSentNews(sentNews);
-    if (!isFirstRun) console.log(`[INFO] ${newCount} nuove notizie inviate.`);
-    else console.log(`[INFO] Primo avvio: ${sentNews.size} notizie indicizzate.`);
 }
 
 // ── Helper: canale vocale dell'utente ─────────
@@ -422,14 +378,14 @@ shoukaku.on("disconnect", (name, moved) => console.warn(`[LAVALINK] Nodo disconn
 client.once("ready", async () => {
     console.log(`[INFO] Bot online come ${client.user.tag}`);
     await registerCommands();
-    await checkNews(true);
-    setInterval(() => checkNews(false), 5 * 60 * 1000);
 });
 
 // ── Gestione comandi ──────────────────────────
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
     const { commandName, guild } = interaction;
+
+
 
     // ── /news ─────────────────────────────────
     if (commandName === "news") {
@@ -459,7 +415,7 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /join ─────────────────────────────────
+        // ── /join ─────────────────────────────────
     if (commandName === "join") {
         const voiceChannel = await getMemberVoiceChannel(interaction);
         if (!voiceChannel) {
@@ -802,15 +758,19 @@ client.on("interactionCreate", async (interaction) => {
             return;
         }
 
-        // 2. Converti in audio con gTTS
+        // 2. Converti in audio con Google Translate TTS (no API key richiesta)
         const tmpFile = path.join(os.tmpdir(), `tricolore_tts_${Date.now()}.mp3`);
         try {
-            await new Promise((resolve, reject) => {
-                const tts = new gTTS(risposta, "it");
-                tts.save(tmpFile, (err) => err ? reject(err) : resolve());
+            const fetch  = require("node-fetch");
+            const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(risposta.slice(0, 200))}&tl=it&client=tw-ob`;
+            const ttsRes = await fetch(ttsUrl, {
+                headers: { "User-Agent": "Mozilla/5.0" },
             });
+            if (!ttsRes.ok) throw new Error(`TTS HTTP ${ttsRes.status}`);
+            const buffer = await ttsRes.buffer();
+            fs.writeFileSync(tmpFile, buffer);
         } catch (err) {
-            console.error("[CHIEDI] gTTS error:", err.message);
+            console.error("[CHIEDI] TTS error:", err.message);
             await interaction.editReply({ content: `💬 **Risposta:** ${risposta}
 
 ⚠️ Impossibile riprodurre l'audio.` });
@@ -925,7 +885,6 @@ app.get("/tts/:fileId", (req, res) => {
 app.get("/health", (_req, res) => res.json({
     status:    "ok",
     uptime:    process.uptime(),
-    sentNews:  sentNews.size,
     nodes:     [...shoukaku.nodes.keys()],
     timestamp: new Date().toISOString(),
 }));
