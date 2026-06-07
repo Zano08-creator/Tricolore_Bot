@@ -17,7 +17,7 @@
     "rss-parser": "^3.13.0",
     "sodium-native": "^4.3.2",
     "@google/generative-ai": "^0.21.0",
-    "gtts": "^0.2.4",
+    "node-gtts": "^2.0.3",
     "node-fetch": "^2.7.0"
   }
 }
