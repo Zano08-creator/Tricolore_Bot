@@ -1,8 +1,8 @@
 "use strict";
 
 // ──────────────────────────────────────────────
-//  Tricolore News Bot  –  index.js
-//  Versione con supporto notizie + musica completa
+//  Tricolore News & Music Bot  –  index.js
+//  Versione con Lavalink (Shoukaku) + notizie ANSA
 // ──────────────────────────────────────────────
 
 const {
@@ -13,33 +13,49 @@ const {
     Routes,
     SlashCommandBuilder,
 } = require("discord.js");
-const {
-    joinVoiceChannel,
-    VoiceConnectionStatus,
-    getVoiceConnection,
-    createAudioPlayer,
-    createAudioResource,
-    AudioPlayerStatus,
-    NoSubscriberBehavior,
-} = require("@discordjs/voice");
+const { Shoukaku, Connectors } = require("shoukaku");
 const Parser  = require("rss-parser");
 const express = require("express");
 const fs      = require("fs");
 const path    = require("path");
-const ytdl    = require("@distube/ytdl-core");
-const yts     = require("yt-search");
 
 // ── Configurazione ────────────────────────────
 const TOKEN      = process.env.TOKEN;
-const CLIENT_ID  = process.env.CLIENT_ID || "1512928969849311272";
-const GUILD_ID   = process.env.GUILD_ID  || "1512809889666175211";
+const CLIENT_ID  = process.env.CLIENT_ID  || "1512928969849311272";
+const GUILD_ID   = process.env.GUILD_ID   || "1512809889666175211";
 const CHANNEL_ID = process.env.CHANNEL_ID;
-const PORT       = process.env.PORT      || 3000;
+const PORT       = process.env.PORT       || 3000;
 
 if (!TOKEN) {
-    console.error("[FATAL] TOKEN non impostato. Imposta la variabile d'ambiente TOKEN.");
+    console.error("[FATAL] TOKEN non impostato.");
     process.exit(1);
 }
+
+// ── Nodi Lavalink pubblici ────────────────────
+// Lista di nodi pubblici gratuiti con fallback automatico
+const LAVALINK_NODES = [
+    {
+        name:      "lavalink.clxud.xyz",
+        url:       "lavalink.clxud.xyz",
+        auth:      "youshallnotpass",
+        port:      443,
+        secure:    true,
+    },
+    {
+        name:      "lavalink.jirayu.net",
+        url:       "lavalink.jirayu.net",
+        auth:      "youshallnotpass",
+        port:      13592,
+        secure:    false,
+    },
+    {
+        name:      "lavalink.devamop.in",
+        url:       "lavalink.devamop.in",
+        auth:      "DevamOP",
+        port:      443,
+        secure:    true,
+    },
+];
 
 // ── Feed RSS ──────────────────────────────────
 const FEEDS = [
@@ -49,7 +65,7 @@ const FEEDS = [
     { url: "https://www.ansa.it/sito/notizie/cronaca/cronaca_rss.xml",    label: "Cronaca",   color: 0xe74c3c },
 ];
 
-// ── Persistenza notizie già inviate ───────────
+// ── Persistenza notizie ───────────────────────
 const SENT_FILE = path.join(__dirname, "sent_news.json");
 
 function loadSentNews() {
@@ -59,7 +75,7 @@ function loadSentNews() {
             return new Set(Array.isArray(data) ? data : []);
         }
     } catch {
-        console.warn("[WARN] Impossibile leggere sent_news.json, si riparte da zero.");
+        console.warn("[WARN] Impossibile leggere sent_news.json.");
     }
     return new Set();
 }
@@ -73,179 +89,96 @@ function saveSentNews(set) {
 }
 
 const sentNews = loadSentNews();
+const sleep    = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ── Utilità ───────────────────────────────────
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function formatDuration(seconds) {
-    if (!seconds) return "Live";
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-// ── Stato Musicale (per guild) ────────────────
-// Struttura: Map<guildId, MusicState>
+// ── Stato Musicale per guild ──────────────────
 const musicStates = new Map();
 
 function getMusicState(guildId) {
     if (!musicStates.has(guildId)) {
         musicStates.set(guildId, {
-            queue:      [],        // Array di { title, url, duration, thumbnail, requestedBy }
-            player:     null,      // AudioPlayer
-            connection: null,      // VoiceConnection
-            current:    null,      // Traccia corrente
-            volume:     100,       // Volume 1-200
-            loop:       "none",    // "none" | "track" | "queue"
-            shuffle:    false,
-            textChannel: null,     // Canale testo per messaggi di stato
+            queue:       [],      // Array di { title, uri, duration, thumbnail, requestedBy }
+            player:      null,    // Shoukaku Player
+            current:     null,    // Traccia corrente
+            volume:      100,     // 1-200
+            loop:        "none",  // "none" | "track" | "queue"
+            shuffle:     false,
+            textChannel: null,
         });
     }
     return musicStates.get(guildId);
 }
 
-// ── Ricerca & Stream YouTube ──────────────────
-async function searchYouTube(query) {
-    // Se è già un URL YouTube, usalo direttamente
-    if (/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)/.test(query)) {
-        try {
-            const info = await ytdl.getInfo(query);
-            const details = info.videoDetails;
-            return {
-                title:       details.title,
-                url:         details.video_url,
-                duration:    parseInt(details.lengthSeconds, 10),
-                thumbnail:   details.thumbnails?.at(-1)?.url ?? null,
-            };
-        } catch {
-            return null;
-        }
-    }
-
-    // Altrimenti cerca per testo
-    try {
-        const result = await yts(query);
-        const video  = result.videos[0];
-        if (!video) return null;
-        return {
-            title:     video.title,
-            url:       video.url,
-            duration:  video.seconds,
-            thumbnail: video.thumbnail,
-        };
-    } catch {
-        return null;
-    }
+function formatDuration(ms) {
+    if (!ms) return "Live";
+    const totalSec = Math.floor(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function createStream(url) {
-    return ytdl(url, {
-        filter:  "audioonly",
-        quality: "highestaudio",
-        highWaterMark: 1 << 25,
-    });
-}
-
-// ── Avvia riproduzione ────────────────────────
+// ── Avvia prossima traccia ────────────────────
 async function playNext(guildId) {
     const state = getMusicState(guildId);
-    const { queue, loop, shuffle } = state;
+    const { queue, loop, shuffle, player } = state;
 
-    if (queue.length === 0) {
+    if (!player) return;
+
+    if (queue.length === 0 && loop !== "track") {
         state.current = null;
-        if (state.textChannel) {
-            state.textChannel.send("✅ **Coda terminata.** Aggiungi altre canzoni con `/play`!").catch(() => {});
-        }
+        state.textChannel?.send("✅ **Coda terminata.** Aggiungi altre canzoni con `/play`!").catch(() => {});
         return;
     }
 
-    // Sceglie la prossima traccia
-    let nextIndex = 0;
-    if (shuffle && queue.length > 1) {
-        nextIndex = Math.floor(Math.random() * queue.length);
-    }
-
-    // In modalità loop traccia, non rimuovere dalla coda
     let track;
     if (loop === "track" && state.current) {
         track = state.current;
     } else {
-        track = queue.splice(nextIndex, 1)[0];
-        if (loop === "queue") queue.push(track); // reinserisce in fondo
+        const idx = shuffle && queue.length > 1
+            ? Math.floor(Math.random() * queue.length)
+            : 0;
+        track = queue.splice(idx, 1)[0];
+        if (loop === "queue") queue.push(track);
     }
 
     state.current = track;
 
     try {
-        const stream   = createStream(track.url);
-        const resource = createAudioResource(stream, { inlineVolume: true });
-        resource.volume?.setVolumeLogarithmic(state.volume / 100);
-        state.currentResource = resource;
+        await player.playTrack({ track: track.encoded });
+        await player.setVolume(state.volume);
 
-        state.player.play(resource);
+        const embed = new EmbedBuilder()
+            .setColor(0x1db954)
+            .setAuthor({ name: "▶  Ora in riproduzione" })
+            .setTitle(track.title.slice(0, 256))
+            .setURL(track.uri)
+            .setThumbnail(track.thumbnail ?? null)
+            .addFields(
+                { name: "Durata",       value: formatDuration(track.duration), inline: true },
+                { name: "Richiesto da", value: track.requestedBy,              inline: true },
+                { name: "Volume",       value: `${state.volume}%`,             inline: true },
+                { name: "Loop",         value: state.loop,                     inline: true },
+                { name: "Shuffle",      value: state.shuffle ? "✅" : "❌",    inline: true },
+                { name: "In coda",      value: `${queue.length} brani`,        inline: true },
+            )
+            .setFooter({ text: "Tricolore Music · Lavalink" })
+            .setTimestamp();
 
-        // Embed "ora in riproduzione"
-        if (state.textChannel) {
-            const embed = new EmbedBuilder()
-                .setColor(0x1db954)
-                .setAuthor({ name: "▶  Ora in riproduzione" })
-                .setTitle(track.title.slice(0, 256))
-                .setURL(track.url)
-                .setThumbnail(track.thumbnail)
-                .addFields(
-                    { name: "Durata",      value: formatDuration(track.duration), inline: true },
-                    { name: "Richiesto da",value: track.requestedBy,              inline: true },
-                    { name: "Volume",      value: `${state.volume}%`,             inline: true },
-                    { name: "Loop",        value: state.loop,                     inline: true },
-                    { name: "Shuffle",     value: state.shuffle ? "✅" : "❌",    inline: true },
-                    { name: "In coda",     value: `${state.queue.length} brani`,  inline: true },
-                )
-                .setFooter({ text: "Tricolore Music" })
-                .setTimestamp();
-
-            state.textChannel.send({ embeds: [embed] }).catch(() => {});
-        }
+        state.textChannel?.send({ embeds: [embed] }).catch(() => {});
     } catch (err) {
-        console.error("[MUSIC] Errore stream:", err.message);
-        if (state.textChannel) {
-            state.textChannel.send(`⚠️ Impossibile riprodurre **${track.title}**. Salto alla prossima...`).catch(() => {});
-        }
+        console.error("[MUSIC] Errore playTrack:", err.message);
+        state.textChannel?.send(`⚠️ Impossibile riprodurre **${track.title}**. Salto...`).catch(() => {});
         playNext(guildId);
     }
 }
 
-// ── Crea/recupera player per guild ───────────
-function ensurePlayer(guildId) {
-    const state = getMusicState(guildId);
-
-    if (state.player) return state.player;
-
-    const player = createAudioPlayer({
-        behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
-    });
-
-    player.on(AudioPlayerStatus.Idle, () => {
-        playNext(guildId);
-    });
-
-    player.on("error", (err) => {
-        console.error("[MUSIC] Player error:", err.message);
-        playNext(guildId);
-    });
-
-    state.player = player;
-    return player;
-}
-
-// ── Slash commands ────────────────────────────
+// ── Slash Commands ────────────────────────────
 const commands = [
-    // NEWS
     new SlashCommandBuilder()
         .setName("news")
         .setDescription("Mostra le ultime notizie ANSA")
         .addStringOption((opt) =>
-            opt.setName("categoria")
-                .setDescription("Filtra per categoria")
+            opt.setName("categoria").setDescription("Filtra per categoria")
                 .addChoices(
                     { name: "Politica", value: "politica" },
                     { name: "Economia", value: "economia" },
@@ -255,84 +188,47 @@ const commands = [
                 )
         ).toJSON(),
 
-    // MUSICA
     new SlashCommandBuilder()
         .setName("play")
         .setDescription("Riproduce una canzone da YouTube (URL o ricerca testo)")
         .addStringOption((opt) =>
-            opt.setName("query")
-                .setDescription("URL YouTube o nome della canzone")
-                .setRequired(true)
+            opt.setName("query").setDescription("URL YouTube o nome della canzone").setRequired(true)
         ).toJSON(),
 
-    new SlashCommandBuilder()
-        .setName("skip")
-        .setDescription("Salta la canzone corrente").toJSON(),
-
-    new SlashCommandBuilder()
-        .setName("stop")
-        .setDescription("Ferma la musica e svuota la coda").toJSON(),
-
-    new SlashCommandBuilder()
-        .setName("pause")
-        .setDescription("Mette in pausa la riproduzione").toJSON(),
-
-    new SlashCommandBuilder()
-        .setName("resume")
-        .setDescription("Riprende la riproduzione").toJSON(),
-
-    new SlashCommandBuilder()
-        .setName("queue")
-        .setDescription("Mostra la coda attuale").toJSON(),
-
-    new SlashCommandBuilder()
-        .setName("nowplaying")
-        .setDescription("Mostra la canzone attualmente in riproduzione").toJSON(),
+    new SlashCommandBuilder().setName("skip")      .setDescription("Salta la canzone corrente").toJSON(),
+    new SlashCommandBuilder().setName("stop")      .setDescription("Ferma la musica e svuota la coda").toJSON(),
+    new SlashCommandBuilder().setName("pause")     .setDescription("Mette in pausa la riproduzione").toJSON(),
+    new SlashCommandBuilder().setName("resume")    .setDescription("Riprende la riproduzione").toJSON(),
+    new SlashCommandBuilder().setName("queue")     .setDescription("Mostra la coda attuale").toJSON(),
+    new SlashCommandBuilder().setName("nowplaying").setDescription("Mostra la canzone in riproduzione").toJSON(),
+    new SlashCommandBuilder().setName("shuffle")   .setDescription("Attiva/disattiva la riproduzione casuale").toJSON(),
+    new SlashCommandBuilder().setName("join")      .setDescription("Fa entrare il bot nel tuo canale vocale").toJSON(),
+    new SlashCommandBuilder().setName("leave")     .setDescription("Fa uscire il bot dal canale vocale").toJSON(),
 
     new SlashCommandBuilder()
         .setName("volume")
         .setDescription("Imposta il volume (1-200)")
         .addIntegerOption((opt) =>
-            opt.setName("valore")
-                .setDescription("Volume da 1 a 200 (default: 100)")
-                .setMinValue(1)
-                .setMaxValue(200)
-                .setRequired(true)
+            opt.setName("valore").setDescription("Volume da 1 a 200").setMinValue(1).setMaxValue(200).setRequired(true)
         ).toJSON(),
 
     new SlashCommandBuilder()
         .setName("loop")
         .setDescription("Imposta la modalità loop")
         .addStringOption((opt) =>
-            opt.setName("modalita")
-                .setDescription("Modalità di ripetizione")
-                .setRequired(true)
+            opt.setName("modalita").setDescription("Modalità di ripetizione").setRequired(true)
                 .addChoices(
-                    { name: "Nessuno",    value: "none"  },
-                    { name: "Traccia",    value: "track" },
-                    { name: "Coda intera",value: "queue" }
+                    { name: "Nessuno",     value: "none"  },
+                    { name: "Traccia",     value: "track" },
+                    { name: "Coda intera", value: "queue" }
                 )
         ).toJSON(),
-
-    new SlashCommandBuilder()
-        .setName("shuffle")
-        .setDescription("Attiva/disattiva la riproduzione casuale").toJSON(),
-
-    new SlashCommandBuilder()
-        .setName("join")
-        .setDescription("Fa entrare il bot nel tuo canale vocale attuale").toJSON(),
-
-    new SlashCommandBuilder()
-        .setName("leave")
-        .setDescription("Fa uscire il bot dal canale vocale e svuota la coda").toJSON(),
 ];
 
 async function registerCommands() {
     try {
         const rest = new REST({ version: "10" }).setToken(TOKEN);
-        await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
-            body: commands,
-        });
+        await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
         console.log("[INFO] Comandi registrati con successo.");
     } catch (err) {
         console.error("[ERROR] Registrazione comandi fallita:", err.message);
@@ -345,7 +241,7 @@ function buildNewsEmbed(item, feedInfo) {
         .setColor(feedInfo.color)
         .setTitle((item.title || "Notizia").slice(0, 256))
         .setURL(item.link)
-        .setDescription((item.contentSnippet || "Nessuna descrizione disponibile.").slice(0, 300))
+        .setDescription((item.contentSnippet || "Nessuna descrizione.").slice(0, 300))
         .setFooter({ text: `Tricolore News · ${feedInfo.label}` })
         .setTimestamp(item.pubDate ? new Date(item.pubDate) : new Date());
 }
@@ -355,60 +251,87 @@ const rssParser = new Parser({ timeout: 10_000 });
 
 async function checkNews(isFirstRun = false) {
     if (!CHANNEL_ID) return;
-
     let channel;
     try {
         channel = await client.channels.fetch(CHANNEL_ID);
         if (!channel?.isTextBased()) return;
     } catch (err) {
-        console.error("[ERROR] Impossibile recuperare il canale:", err.message);
+        console.error("[ERROR] Canale non trovato:", err.message);
         return;
     }
 
     let newCount = 0;
-
     for (const feedInfo of FEEDS) {
         let feed;
-        try {
-            feed = await rssParser.parseURL(feedInfo.url);
-        } catch (err) {
-            console.error(`[ERROR] Feed "${feedInfo.label}":`, err.message);
-            continue;
-        }
+        try { feed = await rssParser.parseURL(feedInfo.url); } catch { continue; }
 
         for (const item of feed.items.slice(0, 5)) {
             if (!item.link || sentNews.has(item.link)) continue;
             sentNews.add(item.link);
             if (isFirstRun) continue;
-
             try {
                 await channel.send({ embeds: [buildNewsEmbed(item, feedInfo)] });
                 newCount++;
                 await sleep(1_200);
             } catch (err) {
-                console.error("[ERROR] Invio embed fallito:", err.message);
+                console.error("[ERROR] Invio notizia:", err.message);
             }
         }
     }
 
     saveSentNews(sentNews);
-
-    if (!isFirstRun) {
-        console.log(`[INFO] Controllo notizie – ${newCount} nuove notizie inviate.`);
-    } else {
-        console.log(`[INFO] Primo avvio: ${sentNews.size} notizie indicizzate.`);
-    }
+    if (!isFirstRun) console.log(`[INFO] ${newCount} nuove notizie inviate.`);
+    else console.log(`[INFO] Primo avvio: ${sentNews.size} notizie indicizzate.`);
 }
 
-// ── Helpers: ottieni canale vocale dell'utente ─
+// ── Helper: canale vocale dell'utente ─────────
 async function getMemberVoiceChannel(interaction) {
     try {
         const member = interaction.guild.members.cache.get(interaction.user.id)
                     ?? await interaction.guild.members.fetch(interaction.user.id);
         return member.voice?.channel ?? null;
-    } catch {
-        return null;
-    }
+    } catch { return null; }
+}
+
+// ── Helper: ottieni/crea player Lavalink ──────
+async function ensureLavalinkPlayer(guild, voiceChannel) {
+    const state = getMusicState(guild.id);
+
+    // Se c'è già un player connesso al canale giusto, riusalo
+    if (state.player && !state.player.destroyed) return state.player;
+
+    // Prende un nodo disponibile
+    const node = shoukaku.options.nodes.length > 0
+        ? shoukaku.getIdealNode()
+        : null;
+
+    if (!node) throw new Error("Nessun nodo Lavalink disponibile al momento.");
+
+    const player = await shoukaku.joinVoiceChannel({
+        guildId:   guild.id,
+        channelId: voiceChannel.id,
+        shardId:   0,
+    });
+
+    // Evento: traccia finita → prossima
+    player.on("end", () => playNext(guild.id));
+
+    // Evento: errore player
+    player.on("exception", (error) => {
+        console.error("[LAVALINK] Eccezione:", error?.message);
+        getMusicState(guild.id).textChannel
+            ?.send("⚠️ Errore durante la riproduzione. Salto alla prossima...").catch(() => {});
+        playNext(guild.id);
+    });
+
+    // Evento: player si è bloccato (stuck)
+    player.on("stuck", () => {
+        console.warn("[LAVALINK] Player bloccato, salto...");
+        playNext(guild.id);
+    });
+
+    state.player = player;
+    return player;
 }
 
 // ── Client Discord ────────────────────────────
@@ -419,6 +342,24 @@ const client = new Client({
     ],
 });
 
+// ── Shoukaku (Lavalink client) ────────────────
+const shoukaku = new Shoukaku(
+    new Connectors.DiscordJS(client),
+    LAVALINK_NODES,
+    {
+        moveOnDisconnect: true,
+        resumable:        false,
+        resumableTimeout: 30,
+        reconnectTries:   3,
+        restTimeout:      10000,
+    }
+);
+
+shoukaku.on("ready",      (name)        => console.log(`[LAVALINK] Nodo connesso: ${name}`));
+shoukaku.on("error",      (name, error) => console.error(`[LAVALINK] Errore nodo ${name}:`, error.message));
+shoukaku.on("disconnect", (name)        => console.warn(`[LAVALINK] Nodo disconnesso: ${name}`));
+
+// ── Ready ─────────────────────────────────────
 client.once("ready", async () => {
     console.log(`[INFO] Bot online come ${client.user.tag}`);
     await registerCommands();
@@ -426,15 +367,12 @@ client.once("ready", async () => {
     setInterval(() => checkNews(false), 5 * 60 * 1000);
 });
 
-// ── Gestione interazioni ──────────────────────
+// ── Gestione comandi ──────────────────────────
 client.on("interactionCreate", async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
-
     const { commandName, guild } = interaction;
 
-    // ════════════════════════════════
-    //  /news
-    // ════════════════════════════════
+    // ── /news ─────────────────────────────────
     if (commandName === "news") {
         await interaction.deferReply();
         const categoria   = interaction.options.getString("categoria") || "tutte";
@@ -455,225 +393,190 @@ client.on("interactionCreate", async (interaction) => {
         }
 
         if (embeds.length === 0) {
-            await interaction.editReply({ content: "⚠️ Nessuna notizia disponibile al momento." });
+            await interaction.editReply({ content: "⚠️ Nessuna notizia disponibile." });
             return;
         }
         await interaction.editReply({ embeds });
         return;
     }
 
-    // ════════════════════════════════
-    //  /join
-    // ════════════════════════════════
+    // ── /join ─────────────────────────────────
     if (commandName === "join") {
         const voiceChannel = await getMemberVoiceChannel(interaction);
         if (!voiceChannel) {
-            await interaction.reply({ content: "❌ Devi prima entrare in un canale vocale!", ephemeral: true });
+            await interaction.reply({ content: "❌ Devi essere in un canale vocale!", ephemeral: true });
             return;
         }
-
-        const existing = getVoiceConnection(guild.id);
-        if (existing) {
-            if (existing.joinConfig.channelId === voiceChannel.id) {
-                await interaction.reply({ content: `✅ Sono già nel canale **${voiceChannel.name}**!`, ephemeral: true });
-                return;
-            }
-            existing.destroy();
-        }
-
         try {
-            const connection = joinVoiceChannel({
-                channelId:      voiceChannel.id,
-                guildId:        guild.id,
-                adapterCreator: guild.voiceAdapterCreator,
-                selfDeaf:       true,
-                selfMute:       false,
-            });
-
-            const state  = getMusicState(guild.id);
-            state.connection  = connection;
+            const state = getMusicState(guild.id);
             state.textChannel = interaction.channel;
-
-            const player = ensurePlayer(guild.id);
-            connection.subscribe(player);
-
+            await ensureLavalinkPlayer(guild, voiceChannel);
             await interaction.reply({ content: `🎙️ Entrato nel canale **${voiceChannel.name}**!` });
         } catch (err) {
-            console.error("[ERROR] join:", err.message);
-            await interaction.reply({ content: "❌ Non riesco ad entrare nel canale vocale.", ephemeral: true });
+            await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
         }
         return;
     }
 
-    // ════════════════════════════════
-    //  /leave
-    // ════════════════════════════════
+    // ── /leave ────────────────────────────────
     if (commandName === "leave") {
-        const connection = getVoiceConnection(guild.id);
-        if (!connection) {
+        const state = getMusicState(guild.id);
+        if (!state.player || state.player.destroyed) {
             await interaction.reply({ content: "❌ Non sono in nessun canale vocale!", ephemeral: true });
             return;
         }
-
-        const state     = getMusicState(guild.id);
-        const chName    = guild.channels.cache.get(connection.joinConfig.channelId)?.name ?? "canale";
-        state.queue     = [];
-        state.current   = null;
-        state.player?.stop();
-        connection.destroy();
+        state.queue   = [];
+        state.current = null;
+        await state.player.stopTrack();
+        shoukaku.leaveVoiceChannel(guild.id);
+        state.player = null;
         musicStates.delete(guild.id);
-
-        await interaction.reply({ content: `👋 Uscito dal canale **${chName}** e coda svuotata.` });
+        await interaction.reply({ content: "👋 Uscito dal canale vocale e coda svuotata." });
         return;
     }
 
-    // ════════════════════════════════
-    //  /play
-    // ════════════════════════════════
+    // ── /play ─────────────────────────────────
     if (commandName === "play") {
         const query = interaction.options.getString("query", true);
         await interaction.deferReply();
 
-        // Assicura che il bot sia nel canale vocale
         const voiceChannel = await getMemberVoiceChannel(interaction);
         if (!voiceChannel) {
             await interaction.editReply({ content: "❌ Devi essere in un canale vocale per usare `/play`!" });
             return;
         }
 
-        let connection = getVoiceConnection(guild.id);
-        if (!connection) {
-            connection = joinVoiceChannel({
-                channelId:      voiceChannel.id,
-                guildId:        guild.id,
-                adapterCreator: guild.voiceAdapterCreator,
-                selfDeaf:       true,
-                selfMute:       false,
-            });
-        }
-
-        const state       = getMusicState(guild.id);
-        state.connection  = connection;
-        state.textChannel = interaction.channel;
-
-        const player = ensurePlayer(guild.id);
-        connection.subscribe(player);
-
-        // Cerca la canzone
-        const track = await searchYouTube(query);
-        if (!track) {
-            await interaction.editReply({ content: `⚠️ Nessun risultato trovato per: **${query}**` });
+        let player;
+        try {
+            const state = getMusicState(guild.id);
+            state.textChannel = interaction.channel;
+            player = await ensureLavalinkPlayer(guild, voiceChannel);
+        } catch (err) {
+            await interaction.editReply({ content: `❌ ${err.message}` });
             return;
         }
 
-        track.requestedBy = interaction.user.username;
-        state.queue.push(track);
+        // Cerca la traccia sul nodo Lavalink
+        const node   = shoukaku.getIdealNode();
+        const isUrl  = /^https?:\/\//.test(query);
+        const search = isUrl ? query : `ytsearch:${query}`;
 
-        const isPlaying = player.state.status === AudioPlayerStatus.Playing
-                       || player.state.status === AudioPlayerStatus.Buffering;
+        let result;
+        try {
+            result = await node.rest.resolve(search);
+        } catch (err) {
+            await interaction.editReply({ content: "⚠️ Errore durante la ricerca. Riprova." });
+            return;
+        }
+
+        if (!result || !result.tracks?.length) {
+            await interaction.editReply({ content: `⚠️ Nessun risultato per: **${query}**` });
+            return;
+        }
+
+        const state  = getMusicState(guild.id);
+        const tracks = result.loadType === "PLAYLIST_LOADED"
+            ? result.tracks
+            : [result.tracks[0]];
+
+        for (const t of tracks) {
+            state.queue.push({
+                encoded:     t.encoded,
+                title:       t.info.title,
+                uri:         t.info.uri,
+                duration:    t.info.length,
+                thumbnail:   t.info.artworkUrl ?? `https://img.youtube.com/vi/${t.info.identifier}/hqdefault.jpg`,
+                requestedBy: interaction.user.username,
+            });
+        }
+
+        const isPlaying = player.track !== null && !player.paused;
 
         if (!isPlaying) {
-            await interaction.editReply({ content: `🎵 Caricamento di **${track.title}**...` });
+            await interaction.editReply({ content: `🎵 Caricamento di **${tracks[0].info.title}**...` });
             playNext(guild.id);
         } else {
             const embed = new EmbedBuilder()
                 .setColor(0x1db954)
-                .setAuthor({ name: "➕  Aggiunto alla coda" })
-                .setTitle(track.title.slice(0, 256))
-                .setURL(track.url)
-                .setThumbnail(track.thumbnail)
+                .setAuthor({ name: tracks.length > 1 ? `➕  Playlist aggiunta (${tracks.length} brani)` : "➕  Aggiunto alla coda" })
+                .setTitle(tracks[0].info.title.slice(0, 256))
+                .setURL(tracks[0].info.uri)
+                .setThumbnail(`https://img.youtube.com/vi/${tracks[0].info.identifier}/hqdefault.jpg`)
                 .addFields(
-                    { name: "Durata",       value: formatDuration(track.duration), inline: true },
-                    { name: "Posizione",    value: `#${state.queue.length}`,        inline: true },
-                    { name: "Richiesto da", value: track.requestedBy,               inline: true },
+                    { name: "Durata",    value: formatDuration(tracks[0].info.length), inline: true },
+                    { name: "Posizione", value: `#${state.queue.length}`,              inline: true },
                 )
-                .setFooter({ text: "Tricolore Music" })
+                .setFooter({ text: "Tricolore Music · Lavalink" })
                 .setTimestamp();
-
             await interaction.editReply({ embeds: [embed] });
         }
         return;
     }
 
-    // ════════════════════════════════
-    //  /skip
-    // ════════════════════════════════
+    // ── /skip ─────────────────────────────────
     if (commandName === "skip") {
         const state = getMusicState(guild.id);
-        if (!state.player || state.player.state.status === AudioPlayerStatus.Idle) {
+        if (!state.player || !state.current) {
             await interaction.reply({ content: "❌ Nessuna canzone in riproduzione.", ephemeral: true });
             return;
         }
-
-        // Forza il passaggio alla prossima (disabilita temporaneamente loop traccia)
         const prevLoop = state.loop;
         if (state.loop === "track") state.loop = "none";
-        state.player.stop();
+        await state.player.stopTrack();
         state.loop = prevLoop;
-
-        await interaction.reply({ content: `⏭️ **${state.current?.title ?? "Canzone"}** saltata.` });
+        await interaction.reply({ content: `⏭️ **${state.current.title}** saltata.` });
         return;
     }
 
-    // ════════════════════════════════
-    //  /stop
-    // ════════════════════════════════
+    // ── /stop ─────────────────────────────────
     if (commandName === "stop") {
         const state = getMusicState(guild.id);
         state.queue   = [];
         state.current = null;
         state.loop    = "none";
-        state.player?.stop();
-
+        await state.player?.stopTrack();
         await interaction.reply({ content: "⏹️ Riproduzione fermata e coda svuotata." });
         return;
     }
 
-    // ════════════════════════════════
-    //  /pause
-    // ════════════════════════════════
+    // ── /pause ────────────────────────────────
     if (commandName === "pause") {
         const state = getMusicState(guild.id);
-        if (state.player?.state.status !== AudioPlayerStatus.Playing) {
-            await interaction.reply({ content: "❌ Il bot non sta riproducendo nulla.", ephemeral: true });
+        if (!state.player || state.player.paused || !state.current) {
+            await interaction.reply({ content: "❌ Nessuna canzone in riproduzione.", ephemeral: true });
             return;
         }
-        state.player.pause();
-        await interaction.reply({ content: `⏸️ Riproduzione in pausa. Usa \`/resume\` per riprendere.` });
+        await state.player.setPaused(true);
+        await interaction.reply({ content: "⏸️ Riproduzione in pausa. Usa `/resume` per riprendere." });
         return;
     }
 
-    // ════════════════════════════════
-    //  /resume
-    // ════════════════════════════════
+    // ── /resume ───────────────────────────────
     if (commandName === "resume") {
         const state = getMusicState(guild.id);
-        if (state.player?.state.status !== AudioPlayerStatus.Paused) {
+        if (!state.player || !state.player.paused) {
             await interaction.reply({ content: "❌ La riproduzione non è in pausa.", ephemeral: true });
             return;
         }
-        state.player.unpause();
-        await interaction.reply({ content: `▶️ Riproduzione ripresa!` });
+        await state.player.setPaused(false);
+        await interaction.reply({ content: "▶️ Riproduzione ripresa!" });
         return;
     }
 
-    // ════════════════════════════════
-    //  /nowplaying
-    // ════════════════════════════════
+    // ── /nowplaying ───────────────────────────
     if (commandName === "nowplaying") {
         const state = getMusicState(guild.id);
         if (!state.current) {
-            await interaction.reply({ content: "❌ Nessuna canzone in riproduzione al momento.", ephemeral: true });
+            await interaction.reply({ content: "❌ Nessuna canzone in riproduzione.", ephemeral: true });
             return;
         }
-
         const track = state.current;
         const embed = new EmbedBuilder()
             .setColor(0x1db954)
             .setAuthor({ name: "🎵  Ora in riproduzione" })
             .setTitle(track.title.slice(0, 256))
-            .setURL(track.url)
-            .setThumbnail(track.thumbnail)
+            .setURL(track.uri)
+            .setThumbnail(track.thumbnail ?? null)
             .addFields(
                 { name: "Durata",       value: formatDuration(track.duration), inline: true },
                 { name: "Richiesto da", value: track.requestedBy,              inline: true },
@@ -682,19 +585,15 @@ client.on("interactionCreate", async (interaction) => {
                 { name: "Shuffle",      value: state.shuffle ? "✅" : "❌",    inline: true },
                 { name: "In coda",      value: `${state.queue.length} brani`,  inline: true },
             )
-            .setFooter({ text: "Tricolore Music" })
+            .setFooter({ text: "Tricolore Music · Lavalink" })
             .setTimestamp();
-
         await interaction.reply({ embeds: [embed] });
         return;
     }
 
-    // ════════════════════════════════
-    //  /queue
-    // ════════════════════════════════
+    // ── /queue ────────────────────────────────
     if (commandName === "queue") {
         const state = getMusicState(guild.id);
-
         if (!state.current && state.queue.length === 0) {
             await interaction.reply({ content: "📭 La coda è vuota.", ephemeral: true });
             return;
@@ -702,17 +601,14 @@ client.on("interactionCreate", async (interaction) => {
 
         const lines = [];
         if (state.current) {
-            lines.push(`**▶  In riproduzione:**\n[${state.current.title}](${state.current.url}) · ${formatDuration(state.current.duration)}\n`);
+            lines.push(`**▶  In riproduzione:**\n[${state.current.title}](${state.current.uri}) · ${formatDuration(state.current.duration)}\n`);
         }
-
         if (state.queue.length > 0) {
             lines.push("**📋  Coda:**");
             state.queue.slice(0, 15).forEach((t, i) => {
-                lines.push(`\`${i + 1}.\` [${t.title.slice(0, 50)}](${t.url}) · ${formatDuration(t.duration)} · *${t.requestedBy}*`);
+                lines.push(`\`${i + 1}.\` [${t.title.slice(0, 50)}](${t.uri}) · ${formatDuration(t.duration)} · *${t.requestedBy}*`);
             });
-            if (state.queue.length > 15) {
-                lines.push(`\n*...e altri ${state.queue.length - 15} brani*`);
-            }
+            if (state.queue.length > 15) lines.push(`\n*...e altri ${state.queue.length - 15} brani*`);
         }
 
         const embed = new EmbedBuilder()
@@ -720,80 +616,63 @@ client.on("interactionCreate", async (interaction) => {
             .setTitle("🎶  Coda musicale")
             .setDescription(lines.join("\n").slice(0, 4096))
             .addFields(
-                { name: "Loop",    value: state.loop,                     inline: true },
-                { name: "Shuffle", value: state.shuffle ? "✅" : "❌",    inline: true },
-                { name: "Volume",  value: `${state.volume}%`,             inline: true },
+                { name: "Loop",    value: state.loop,                  inline: true },
+                { name: "Shuffle", value: state.shuffle ? "✅" : "❌", inline: true },
+                { name: "Volume",  value: `${state.volume}%`,          inline: true },
             )
             .setFooter({ text: `${state.queue.length} brani in attesa · Tricolore Music` })
             .setTimestamp();
-
         await interaction.reply({ embeds: [embed] });
         return;
     }
 
-    // ════════════════════════════════
-    //  /volume
-    // ════════════════════════════════
+    // ── /volume ───────────────────────────────
     if (commandName === "volume") {
         const value = interaction.options.getInteger("valore", true);
         const state = getMusicState(guild.id);
         state.volume = value;
-
-        // Applica subito se c'è una risorsa attiva
-        if (state.currentResource?.volume) {
-            state.currentResource.volume.setVolumeLogarithmic(value / 100);
-        }
-
+        await state.player?.setVolume(value);
         await interaction.reply({ content: `🔊 Volume impostato a **${value}%**.` });
         return;
     }
 
-    // ════════════════════════════════
-    //  /loop
-    // ════════════════════════════════
+    // ── /loop ─────────────────────────────────
     if (commandName === "loop") {
         const modalita = interaction.options.getString("modalita", true);
         const state    = getMusicState(guild.id);
         state.loop     = modalita;
-
-        const labels = { none: "🚫 Nessun loop", track: "🔂 Loop traccia", queue: "🔁 Loop coda" };
+        const labels   = { none: "🚫 Nessun loop", track: "🔂 Loop traccia", queue: "🔁 Loop coda" };
         await interaction.reply({ content: `Loop impostato su: **${labels[modalita]}**` });
         return;
     }
 
-    // ════════════════════════════════
-    //  /shuffle
-    // ════════════════════════════════
+    // ── /shuffle ──────────────────────────────
     if (commandName === "shuffle") {
         const state   = getMusicState(guild.id);
         state.shuffle = !state.shuffle;
         await interaction.reply({
             content: state.shuffle
-                ? "🔀 Shuffle **attivato**! Le canzoni verranno riprodotte in ordine casuale."
-                : "➡️ Shuffle **disattivato**. Riproduzione in ordine normale.",
+                ? "🔀 Shuffle **attivato**!"
+                : "➡️ Shuffle **disattivato**.",
         });
         return;
     }
 });
 
-// ── Server Express (keep-alive) ───────────────
+// ── Express keep-alive ────────────────────────
 const app = express();
+app.get("/",       (_req, res) => res.send("Tricolore News & Music Bot – Online ✅"));
+app.get("/health", (_req, res) => res.json({
+    status:    "ok",
+    uptime:    process.uptime(),
+    sentNews:  sentNews.size,
+    timestamp: new Date().toISOString(),
+}));
+app.listen(PORT, () => console.log(`[INFO] Express in ascolto sulla porta ${PORT}`));
 
-app.get("/", (_req, res) => res.send("Tricolore News & Music Bot – Online ✅"));
-app.get("/health", (_req, res) =>
-    res.json({
-        status:    "ok",
-        uptime:    process.uptime(),
-        sentNews:  sentNews.size,
-        timestamp: new Date().toISOString(),
-    })
-);
+// ── Errori globali ────────────────────────────
+process.on("unhandledRejection", (r) => console.error("[UNHANDLED REJECTION]", r));
+process.on("uncaughtException",  (e) => console.error("[UNCAUGHT EXCEPTION]", e.message));
 
-app.listen(PORT, () => console.log(`[INFO] Server Express in ascolto sulla porta ${PORT}`));
-
-// ── Gestione errori globale ───────────────────
-process.on("unhandledRejection", (reason) => console.error("[UNHANDLED REJECTION]", reason));
-process.on("uncaughtException",  (err)    => console.error("[UNCAUGHT EXCEPTION]", err.message));
-
-// ── Avvio ─────────────────────────────────────
+// ── Login ─────────────────────────────────────
 client.login(TOKEN);
