@@ -19,7 +19,6 @@ const express = require("express");
 const fs      = require("fs");
 const path    = require("path");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const gTTS    = require("node-gtts");
 const os      = require("os");
 
 // ── Configurazione ────────────────────────────
