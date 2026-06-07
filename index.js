@@ -252,7 +252,7 @@ const commands = [
 async function registerCommands() {
     try {
         const rest = new REST({ version: "10" }).setToken(TOKEN);
-        await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
+        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
         console.log("[INFO] Comandi registrati con successo.");
     } catch (err) {
         console.error("[ERROR] Registrazione comandi fallita:", err.message);
