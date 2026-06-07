@@ -179,7 +179,7 @@ async function askAI(domanda) {
                 "Authorization": `Bearer ${GROQ_KEY}`,
             },
             body: JSON.stringify({
-                model: "llama3-8b-8192",
+                model: "llama-3.1-8b-instant",
                 messages: [
                     { role: "system", content: SYSTEM_PROMPT },
                     { role: "user",   content: domanda },
