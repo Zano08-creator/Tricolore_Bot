@@ -18,11 +18,18 @@ const Parser  = require("rss-parser");
 const express = require("express");
 const fs      = require("fs");
 const path    = require("path");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+const gTTS    = require("gtts");
+const os      = require("os");
 
 // ── Configurazione ────────────────────────────
 const TOKEN      = process.env.TOKEN;
 const CLIENT_ID  = process.env.CLIENT_ID  || "1512928969849311272";
+const GUILD_ID   = process.env.GUILD_ID   || "1512809889666175211";
+const CHANNEL_ID = process.env.CHANNEL_ID;
 const PORT       = process.env.PORT       || 3000;
+
+const GEMINI_KEY = process.env.GEMINI_KEY;
 
 if (!TOKEN) {
     console.error("[FATAL] TOKEN non impostato.");
@@ -99,6 +106,9 @@ function saveSentNews(set) {
 }
 
 const sentNews = loadSentNews();
+
+// ── Mappa file TTS temporanei ─────────────────
+const ttsFiles = new Map(); // fileId → tmpFilePath
 const sleep    = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── Stato musicale per guild ──────────────────
@@ -223,6 +233,13 @@ const commands = [
     new SlashCommandBuilder().setName("resume")    .setDescription("Riprende la riproduzione").toJSON(),
     new SlashCommandBuilder().setName("queue")     .setDescription("Mostra la coda attuale").toJSON(),
     new SlashCommandBuilder().setName("nowplaying").setDescription("Mostra la canzone in riproduzione").toJSON(),
+    new SlashCommandBuilder()
+        .setName("chiedi")
+        .setDescription("Fai una domanda all'IA – risponde a voce nel canale vocale")
+        .addStringOption((opt) =>
+            opt.setName("domanda").setDescription("La tua domanda").setRequired(true)
+        ).toJSON(),
+
     new SlashCommandBuilder().setName("shuffle")   .setDescription("Attiva/disattiva la riproduzione casuale").toJSON(),
     new SlashCommandBuilder().setName("join")      .setDescription("Fa entrare il bot nel tuo canale vocale").toJSON(),
     new SlashCommandBuilder().setName("leave")     .setDescription("Fa uscire il bot dal canale vocale").toJSON(),
@@ -754,6 +771,125 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
+    // ── /chiedi ──────────────────────────────
+    if (commandName === "chiedi") {
+        const domanda = interaction.options.getString("domanda", true);
+        await interaction.deferReply();
+
+        // Controlla che il bot sia in un canale vocale
+        const state = getMusicState(guild.id);
+        if (!state.player || state.player.destroyed) {
+            await interaction.editReply({ content: "❌ Devo essere in un canale vocale! Usa prima `/join`." });
+            return;
+        }
+
+        if (!GEMINI_KEY) {
+            await interaction.editReply({ content: "❌ `GEMINI_KEY` non configurata nelle variabili d'ambiente." });
+            return;
+        }
+
+        // 1. Chiedi a Gemini
+        let risposta;
+        try {
+            const genAI = new GoogleGenerativeAI(GEMINI_KEY);
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            const result = await model.generateContent(
+                `Sei Tricolore, un assistente vocale simpatico in un server Discord italiano. ` +
+                `Rispondi in italiano, in modo chiaro e conciso (max 3 frasi). ` +
+                `Domanda: ${domanda}`
+            );
+            risposta = result.response.text().trim();
+        } catch (err) {
+            console.error("[CHIEDI] Gemini error:", err.message);
+            await interaction.editReply({ content: "⚠️ Errore durante la risposta dell'IA. Riprova." });
+            return;
+        }
+
+        // 2. Converti in audio con gTTS
+        const tmpFile = path.join(os.tmpdir(), `tricolore_tts_${Date.now()}.mp3`);
+        try {
+            await new Promise((resolve, reject) => {
+                const tts = new gTTS(risposta, "it");
+                tts.save(tmpFile, (err) => err ? reject(err) : resolve());
+            });
+        } catch (err) {
+            console.error("[CHIEDI] gTTS error:", err.message);
+            await interaction.editReply({ content: `💬 **Risposta:** ${risposta}
+
+⚠️ Impossibile riprodurre l'audio.` });
+            return;
+        }
+
+        // 3. Riproduci tramite Lavalink (file locale via URL base64 non supportato,
+        //    usiamo un server HTTP temporaneo esposto tramite l'URL pubblico del servizio)
+        const node = getAvailableNode();
+        if (!node) {
+            await interaction.editReply({ content: `💬 **Risposta:** ${risposta}
+
+⚠️ Nessun nodo audio disponibile.` });
+            fs.unlink(tmpFile, () => {});
+            return;
+        }
+
+        // Servi il file audio tramite Express su un endpoint temporaneo
+        const fileId  = path.basename(tmpFile);
+        const fileUrl = `${SERVICE_URL}/tts/${fileId}`;
+
+        // Aggiungi route temporanea
+        ttsFiles.set(fileId, tmpFile);
+
+        try {
+            const searchResult = await node.rest.resolve(fileUrl);
+            if (!searchResult || !searchResult.data) throw new Error("Nessun risultato");
+
+            const tracks = searchResult.loadType === "track"
+                ? [searchResult.data]
+                : searchResult.data?.[0] ? [searchResult.data[0]] : [];
+
+            if (tracks.length === 0) throw new Error("Traccia non trovata");
+
+            // Metti in testa alla coda con priorità
+            state.queue.unshift({
+                encoded:     tracks[0].encoded,
+                title:       `🤖 Risposta IA: ${domanda.slice(0, 50)}`,
+                uri:         fileUrl,
+                duration:    0,
+                thumbnail:   null,
+                requestedBy: "Tricolore AI",
+                isTTS:       true,
+                tmpFile,
+            });
+
+            const embed = new EmbedBuilder()
+                .setColor(0x7289da)
+                .setAuthor({ name: "🤖 Tricolore AI" })
+                .setTitle(domanda.slice(0, 256))
+                .setDescription(risposta.slice(0, 1024))
+                .setFooter({ text: "Risposta generata da Gemini · Tricolore Bot" })
+                .setTimestamp();
+
+            await interaction.editReply({ embeds: [embed] });
+
+            // Avvia se non sta riproducendo
+            if (!state.isPlaying) playNext(guild.id);
+
+        } catch (err) {
+            console.error("[CHIEDI] Lavalink resolve error:", err.message);
+            // Fallback: mostra solo testo
+            const embed = new EmbedBuilder()
+                .setColor(0x7289da)
+                .setAuthor({ name: "🤖 Tricolore AI" })
+                .setTitle(domanda.slice(0, 256))
+                .setDescription(risposta.slice(0, 1024))
+                .setFooter({ text: "Risposta testuale (audio non disponibile) · Tricolore Bot" })
+                .setTimestamp();
+            await interaction.editReply({ embeds: [embed] });
+            fs.unlink(tmpFile, () => {});
+            ttsFiles.delete(fileId);
+        }
+        return;
+    }
+
     // ── /shuffle ──────────────────────────────
     if (commandName === "shuffle") {
         const state   = getMusicState(guild.id);
@@ -770,6 +906,25 @@ client.on("interactionCreate", async (interaction) => {
 // ── Express keep-alive ────────────────────────
 const app = express();
 app.get("/",       (_req, res) => res.send("Tricolore News & Music Bot – Online ✅"));
+
+// Serve file TTS temporanei per Lavalink
+app.get("/tts/:fileId", (req, res) => {
+    const filePath = ttsFiles.get(req.params.fileId);
+    if (!filePath || !fs.existsSync(filePath)) {
+        res.status(404).send("Not found");
+        return;
+    }
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.sendFile(filePath, (err) => {
+        if (!err) {
+            // Pulisci dopo la riproduzione
+            setTimeout(() => {
+                fs.unlink(filePath, () => {});
+                ttsFiles.delete(req.params.fileId);
+            }, 30_000);
+        }
+    });
+});
 app.get("/health", (_req, res) => res.json({
     status:    "ok",
     uptime:    process.uptime(),
@@ -777,6 +932,9 @@ app.get("/health", (_req, res) => res.json({
     nodes:     [...shoukaku.nodes.keys()],
     timestamp: new Date().toISOString(),
 }));
+// ── URL pubblico del servizio (usato da keep-alive e TTS) ──
+const SERVICE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+
 app.listen(PORT, () => console.log(`[INFO] Express in ascolto sulla porta ${PORT}`));
 
 // ── Errori globali ────────────────────────────
@@ -785,7 +943,6 @@ process.on("uncaughtException",  (e) => console.error("[UNCAUGHT EXCEPTION]", e.
 
 // ── Keep-alive self-ping (Render free tier) ──────
 // Pinga il proprio URL ogni 14 minuti per evitare lo sleep automatico.
-const SERVICE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 setInterval(() => {
     const lib = SERVICE_URL.startsWith("https") ? require("https") : require("http");
     lib.get(`${SERVICE_URL}/health`, (res) => {
