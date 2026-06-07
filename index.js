@@ -157,103 +157,49 @@ async function generateTTS(text) {
 }
 
 // ─────────────────────────────────────────────
-//  AI: DuckDuckGo AI Chat (gratuito, senza chiave)
-//      Fallback: Pollinations AI
+//  AI: Groq (gratuito, 14.400 req/giorno)
 // ─────────────────────────────────────────────
+const GROQ_KEY = process.env.GROQ_KEY;
+
 const SYSTEM_PROMPT =
     "Sei Tricolore, un assistente simpatico in un server Discord italiano. " +
     "Rispondi SEMPRE in italiano, in modo chiaro e conciso (massimo 2-3 frasi). " +
     "Non usare markdown, asterischi o simboli speciali.";
 
-async function askDuckDuckGo(domanda) {
-    // Step 1: ottieni il token VQD
-    const statusRes = await fetch("https://duckduckgo.com/duckchat/v1/status", {
-        headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "x-vqd-accept": "1",
-        },
-        timeout: 10_000,
-    });
-    if (!statusRes.ok) throw new Error(`DDG status HTTP ${statusRes.status}`);
-    const vqd = statusRes.headers.get("x-vqd-4");
-    if (!vqd) throw new Error("Token VQD non ricevuto");
-
-    // Step 2: manda la domanda
-    const chatRes = await fetch("https://duckduckgo.com/duckchat/v1/chat", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "x-vqd-4": vqd,
-        },
-        body: JSON.stringify({
-            model: "gpt-4o-mini",
-            messages: [
-                { role: "user", content: `${SYSTEM_PROMPT}\n\nDomanda: ${domanda}` },
-            ],
-        }),
-        timeout: 20_000,
-    });
-    if (!chatRes.ok) throw new Error(`DDG chat HTTP ${chatRes.status}`);
-
-    // Step 3: leggi lo stream SSE e concatena i chunk
-    const text = await chatRes.text();
-    let risposta = "";
-    for (const line of text.split("\n")) {
-        if (!line.startsWith("data: ")) continue;
-        const chunk = line.slice(6).trim();
-        if (chunk === "[DONE]") break;
-        try {
-            const parsed = JSON.parse(chunk);
-            risposta += parsed?.message ?? "";
-        } catch {}
-    }
-    if (!risposta.trim()) throw new Error("Risposta vuota da DDG");
-    return risposta.trim();
-}
-
-async function askPollinations(domanda) {
-    const res = await fetch("https://text.pollinations.ai/openai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            model: "openai",
-            messages: [
-                { role: "system", content: SYSTEM_PROMPT },
-                { role: "user",   content: domanda },
-            ],
-            seed: 42,
-            private: true,
-        }),
-        timeout: 20_000,
-    });
-    if (!res.ok) throw new Error(`Pollinations HTTP ${res.status}`);
-    const data = await res.json();
-    const risposta = data?.choices?.[0]?.message?.content?.trim();
-    if (!risposta) throw new Error("Risposta vuota da Pollinations");
-    return risposta;
-}
-
 async function askAI(domanda) {
-    // Prova DuckDuckGo prima
-    try {
-        const r = await askDuckDuckGo(domanda);
-        console.log("[AI] Risposta da DuckDuckGo.");
-        return r;
-    } catch (err) {
-        console.warn("[AI] DuckDuckGo fallito:", err.message, "– provo Pollinations...");
+    if (!GROQ_KEY) {
+        console.error("[AI] GROQ_KEY non impostata!");
+        return null;
     }
-    // Fallback Pollinations
     try {
-        const r = await askPollinations(domanda);
-        console.log("[AI] Risposta da Pollinations.");
-        return r;
+        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type":  "application/json",
+                "Authorization": `Bearer ${GROQ_KEY}`,
+            },
+            body: JSON.stringify({
+                model: "llama3-8b-8192",
+                messages: [
+                    { role: "system", content: SYSTEM_PROMPT },
+                    { role: "user",   content: domanda },
+                ],
+                max_tokens: 200,
+                temperature: 0.7,
+            }),
+            timeout: 15_000,
+        });
+        if (!res.ok) throw new Error(`Groq HTTP ${res.status}`);
+        const data = await res.json();
+        const risposta = data?.choices?.[0]?.message?.content?.trim();
+        if (!risposta) throw new Error("Risposta vuota");
+        console.log("[AI] Risposta da Groq OK.");
+        return risposta;
     } catch (err) {
-        console.error("[AI] Entrambe le API fallite:", err.message);
+        console.error("[AI] Groq fallito:", err.message);
         return null;
     }
 }
-
 // ─────────────────────────────────────────────
 //  HELPERS
 // ─────────────────────────────────────────────
