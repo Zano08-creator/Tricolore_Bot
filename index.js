@@ -50,7 +50,6 @@ const rssParser = new Parser({ timeout: 10_000 });
 //  STATO MUSICALE
 // ─────────────────────────────────────────────
 const musicStates = new Map();
-const ttsFiles    = new Map();
 
 function getMusicState(guildId) {
     if (!musicStates.has(guildId)) {
@@ -127,33 +126,19 @@ async function playNext(guildId) {
         state.textChannel?.send({ embeds: [embed] }).catch(() => {});
     } catch (err) {
         console.error("[MUSIC] Errore playTrack:", err.message);
-        cleanTTS(track);
-        state.isPlaying = false;
+            state.isPlaying = false;
         playNext(guildId);
     }
 }
 
 // ─────────────────────────────────────────────
-//  TTS: genera MP3 con Google Translate
+//  TTS: StreamElements (URL diretto, nessuna chiave)
+//  Lavalink carica l'URL direttamente senza passare per Render
 // ─────────────────────────────────────────────
-async function generateTTS(text) {
-    const testo = text.replace(/[*_`~]/g, "").slice(0, 200);
-    const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(testo)}&tl=it&client=tw-ob`;
-    try {
-        const res = await fetch(url, {
-            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-            timeout: 10_000,
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const buf = await res.buffer();
-        if (buf.length < 1000) throw new Error("Risposta troppo corta");
-        const tmpFile = path.join(os.tmpdir(), `tts_${Date.now()}.mp3`);
-        fs.writeFileSync(tmpFile, buf);
-        return tmpFile;
-    } catch (err) {
-        console.warn("[TTS] Errore:", err.message);
-        return null;
-    }
+function buildTTSUrl(text) {
+    // StreamElements supporta voci italiane: Giorgio (m), Bianca (f)
+    const testo = text.replace(/[*_`~]/g, "").slice(0, 300);
+    return `https://api.streamelements.com/kappa/v2/speech?voice=Giorgio&text=${encodeURIComponent(testo)}`;
 }
 
 // ─────────────────────────────────────────────
@@ -203,13 +188,6 @@ async function askAI(domanda) {
 // ─────────────────────────────────────────────
 //  HELPERS
 // ─────────────────────────────────────────────
-function cleanTTS(track) {
-    if (track?.isTTS && track?.tmpFile) {
-        fs.unlink(track.tmpFile, () => {});
-        ttsFiles.delete(path.basename(track.tmpFile));
-    }
-}
-
 function getAvailableNode() {
     for (const node of shoukaku.nodes.values()) {
         if (node.state === 1) return node;
@@ -234,14 +212,12 @@ async function ensurePlayer(guild, voiceChannel) {
     });
     player.on("end", () => {
         const s = getMusicState(guild.id);
-        cleanTTS(s.current);
         s.isPlaying = false;
         playNext(guild.id);
     });
     player.on("exception", (data) => {
         console.error("[LAVALINK] Eccezione:", data?.exception?.message ?? data);
         const s = getMusicState(guild.id);
-        cleanTTS(s.current);
         s.isPlaying = false;
         s.textChannel?.send("⚠️ Errore riproduzione. Salto alla prossima...").catch(() => {});
         playNext(guild.id);
@@ -598,20 +574,14 @@ client.on("interactionCreate", async (interaction) => {
         // 3. Se non è in un canale vocale, ci fermiamo qui
         if (!inVoice) return;
 
-        // 4. Genera TTS
-        const tmpFile = await generateTTS(risposta);
-        if (!tmpFile) return; // risposta scritta già inviata, audio non disponibile
-
-        // 5. Serve il file e passa l'URL a Lavalink
+        // 4. Costruisci URL TTS diretto (StreamElements, nessun file temporaneo)
+        const ttsUrl = buildTTSUrl(risposta);
         const node = getAvailableNode();
-        if (!node) { fs.unlink(tmpFile, () => {}); return; }
+        if (!node) return;
 
-        const fileId  = path.basename(tmpFile);
-        const fileUrl = `${SERVICE_URL}/tts/${fileId}`;
-        ttsFiles.set(fileId, tmpFile);
-
+        // 5. Passa l'URL direttamente a Lavalink
         try {
-            const resolved = await node.rest.resolve(fileUrl);
+            const resolved = await node.rest.resolve(ttsUrl);
             const rawTracks = resolved?.loadType === "track"
                 ? [resolved.data]
                 : (resolved?.data?.tracks ?? []);
@@ -620,18 +590,17 @@ client.on("interactionCreate", async (interaction) => {
             const ttsTrack = {
                 encoded: rawTracks[0].encoded,
                 title: `🤖 ${domanda.slice(0, 50)}`,
-                uri: fileUrl, duration: 0, thumbnail: null,
+                uri: ttsUrl, duration: 0, thumbnail: null,
                 requestedBy: "Tricolore AI",
-                isTTS: true, tmpFile,
+                isTTS: true,
             };
 
             // Metti in testa alla coda
             state.queue.unshift(ttsTrack);
             if (!state.isPlaying) playNext(guild.id);
+            console.log("[TTS] Traccia StreamElements aggiunta alla coda.");
         } catch (err) {
             console.warn("[CHIEDI] Audio error:", err.message);
-            fs.unlink(tmpFile, () => {});
-            ttsFiles.delete(fileId);
         }
         return;
     }
@@ -643,13 +612,6 @@ client.on("interactionCreate", async (interaction) => {
 const app = express();
 
 app.get("/", (_req, res) => res.send("Tricolore Bot – Online ✅"));
-
-app.get("/tts/:fileId", (req, res) => {
-    const filePath = ttsFiles.get(req.params.fileId);
-    if (!filePath || !fs.existsSync(filePath)) { res.status(404).send("Not found"); return; }
-    res.setHeader("Content-Type", "audio/mpeg");
-    res.sendFile(filePath);
-});
 
 app.get("/health", (_req, res) => res.json({
     status: "ok",
@@ -670,19 +632,6 @@ setInterval(() => {
         console.log(`[KEEP-ALIVE] OK – status ${res.statusCode}`);
     }).on("error", err => console.warn("[KEEP-ALIVE] Fallito:", err.message));
 }, 14 * 60 * 1000);
-
-// ─────────────────────────────────────────────
-//  PULIZIA FILE TTS ORFANI (ogni 10 minuti)
-// ─────────────────────────────────────────────
-setInterval(() => {
-    const now = Date.now();
-    for (const [id, filePath] of ttsFiles.entries()) {
-        try {
-            const age = now - fs.statSync(filePath).mtimeMs;
-            if (age > 5 * 60 * 1000) { fs.unlink(filePath, () => {}); ttsFiles.delete(id); }
-        } catch { ttsFiles.delete(id); }
-    }
-}, 10 * 60 * 1000);
 
 // ─────────────────────────────────────────────
 //  GESTIONE ERRORI GLOBALI
