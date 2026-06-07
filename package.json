@@ -1,7 +1,7 @@
 {
   "name": "tricolore-bot",
   "version": "1.0.0",
-  "description": "",
+  "description": "Tricolore News & Music Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -11,10 +11,10 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "discord.js": "^14.26.4",
-    "express": "^5.2.1",
+    "discord.js": "^14.16.3",
+    "shoukaku": "^4.0.1",
+    "express": "^4.21.2",
     "rss-parser": "^3.13.0",
-    "@discordjs/voice": "^0.17.0",
-    "shoukaku": "^4.0.1"
+    "sodium-native": "^4.3.2"
   }
 }
