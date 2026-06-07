@@ -745,7 +745,7 @@ client.on("interactionCreate", async (interaction) => {
         let risposta;
         try {
             const genAI = new GoogleGenerativeAI(GEMINI_KEY);
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
             const result = await model.generateContent(
                 `Sei Tricolore, un assistente vocale simpatico in un server Discord italiano. ` +
                 `Rispondi in italiano, in modo chiaro e conciso (max 3 frasi). ` +
