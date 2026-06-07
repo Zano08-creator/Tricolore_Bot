@@ -2,7 +2,7 @@
 
 // ──────────────────────────────────────────────
 //  Tricolore News & Music Bot  –  index.js
-//  Versione con Lavalink (Shoukaku) + notizie ANSA
+//  Shoukaku v4 + notizie ANSA  –  versione corretta
 // ──────────────────────────────────────────────
 
 const {
@@ -31,29 +31,37 @@ if (!TOKEN) {
     process.exit(1);
 }
 
-// ── Nodi Lavalink pubblici ────────────────────
-// Lista di nodi pubblici gratuiti con fallback automatico
+// ── Nodi Lavalink ─────────────────────────────
+// Usa più nodi così Shoukaku fa fallback automatico se uno è offline.
+// Puoi aggiungere il tuo nodo self-hosted qui sopra per maggiore affidabilità.
 const LAVALINK_NODES = [
     {
-        name:      "lavalink.clxud.xyz",
-        url:       "lavalink.clxud.xyz",
-        auth:      "youshallnotpass",
-        port:      443,
-        secure:    true,
+        name:   "lavalink1",
+        url:    "lavalink.clxud.xyz",
+        auth:   "youshallnotpass",
+        port:   443,
+        secure: true,
     },
     {
-        name:      "lavalink.jirayu.net",
-        url:       "lavalink.jirayu.net",
-        auth:      "youshallnotpass",
-        port:      13592,
-        secure:    false,
+        name:   "lavalink2",
+        url:    "lavalink.devamop.in",
+        auth:   "DevamOP",
+        port:   443,
+        secure: true,
     },
     {
-        name:      "lavalink.devamop.in",
-        url:       "lavalink.devamop.in",
-        auth:      "DevamOP",
-        port:      443,
-        secure:    true,
+        name:   "lavalink3",
+        url:    "lavalink.jirayu.net",
+        auth:   "youshallnotpass",
+        port:   13592,
+        secure: false,
+    },
+    {
+        name:   "lavalink4",
+        url:    "lava.link",
+        auth:   "dismusic",
+        port:   443,
+        secure: true,
     },
 ];
 
@@ -91,29 +99,32 @@ function saveSentNews(set) {
 const sentNews = loadSentNews();
 const sleep    = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ── Stato Musicale per guild ──────────────────
+// ── Stato musicale per guild ──────────────────
 const musicStates = new Map();
 
 function getMusicState(guildId) {
     if (!musicStates.has(guildId)) {
         musicStates.set(guildId, {
-            queue:       [],      // Array di { title, uri, duration, thumbnail, requestedBy }
-            player:      null,    // Shoukaku Player
-            current:     null,    // Traccia corrente
-            volume:      100,     // 1-200
-            loop:        "none",  // "none" | "track" | "queue"
+            queue:       [],
+            player:      null,
+            current:     null,
+            volume:      100,
+            loop:        "none",   // "none" | "track" | "queue"
             shuffle:     false,
             textChannel: null,
+            isPlaying:   false,    // flag manuale (player.track non affidabile in v4)
         });
     }
     return musicStates.get(guildId);
 }
 
 function formatDuration(ms) {
-    if (!ms) return "Live";
+    if (!ms || ms <= 0) return "Live";
     const totalSec = Math.floor(ms / 1000);
-    const m = Math.floor(totalSec / 60);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
     const s = totalSec % 60;
+    if (h > 0) return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
     return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
@@ -122,30 +133,38 @@ async function playNext(guildId) {
     const state = getMusicState(guildId);
     const { queue, loop, shuffle, player } = state;
 
-    if (!player) return;
+    if (!player || player.destroyed) {
+        state.isPlaying = false;
+        return;
+    }
 
+    // Coda vuota e loop non attivo
     if (queue.length === 0 && loop !== "track") {
-        state.current = null;
+        state.current   = null;
+        state.isPlaying = false;
         state.textChannel?.send("✅ **Coda terminata.** Aggiungi altre canzoni con `/play`!").catch(() => {});
         return;
     }
 
     let track;
     if (loop === "track" && state.current) {
+        // Ripete la stessa traccia
         track = state.current;
     } else {
         const idx = shuffle && queue.length > 1
             ? Math.floor(Math.random() * queue.length)
             : 0;
         track = queue.splice(idx, 1)[0];
-        if (loop === "queue") queue.push(track);
+        if (loop === "queue") queue.push({ ...track });
     }
 
-    state.current = track;
+    state.current   = track;
+    state.isPlaying = true;
 
     try {
-        await player.playTrack({ track: track.encoded });
-        await player.setVolume(state.volume);
+        // ── Shoukaku v4: player.playTrack({ track: { encoded } }) ──
+        await player.playTrack({ track: { encoded: track.encoded } });
+        await player.setGlobalVolume(state.volume);
 
         const embed = new EmbedBuilder()
             .setColor(0x1db954)
@@ -154,12 +173,12 @@ async function playNext(guildId) {
             .setURL(track.uri)
             .setThumbnail(track.thumbnail ?? null)
             .addFields(
-                { name: "Durata",       value: formatDuration(track.duration), inline: true },
-                { name: "Richiesto da", value: track.requestedBy,              inline: true },
-                { name: "Volume",       value: `${state.volume}%`,             inline: true },
-                { name: "Loop",         value: state.loop,                     inline: true },
-                { name: "Shuffle",      value: state.shuffle ? "✅" : "❌",    inline: true },
-                { name: "In coda",      value: `${queue.length} brani`,        inline: true },
+                { name: "⏱ Durata",       value: formatDuration(track.duration), inline: true },
+                { name: "👤 Richiesto da", value: track.requestedBy,              inline: true },
+                { name: "🔊 Volume",       value: `${state.volume}%`,             inline: true },
+                { name: "🔁 Loop",         value: state.loop,                     inline: true },
+                { name: "🔀 Shuffle",      value: state.shuffle ? "✅" : "❌",    inline: true },
+                { name: "📋 In coda",      value: `${queue.length} brani`,        inline: true },
             )
             .setFooter({ text: "Tricolore Music · Lavalink" })
             .setTimestamp();
@@ -168,6 +187,7 @@ async function playNext(guildId) {
     } catch (err) {
         console.error("[MUSIC] Errore playTrack:", err.message);
         state.textChannel?.send(`⚠️ Impossibile riprodurre **${track.title}**. Salto...`).catch(() => {});
+        state.isPlaying = false;
         playNext(guildId);
     }
 }
@@ -293,41 +313,62 @@ async function getMemberVoiceChannel(interaction) {
     } catch { return null; }
 }
 
+// ── Helper: ottieni nodo disponibile ──────────
+function getAvailableNode() {
+    // Shoukaku v4: shoukaku.nodes è una Map<string, Node>
+    for (const node of shoukaku.nodes.values()) {
+        if (node.state === 1 /* CONNECTED */) return node;
+    }
+    return null;
+}
+
 // ── Helper: ottieni/crea player Lavalink ──────
 async function ensureLavalinkPlayer(guild, voiceChannel) {
     const state = getMusicState(guild.id);
 
-    // Se c'è già un player connesso al canale giusto, riusalo
+    // Riusa il player se ancora valido
     if (state.player && !state.player.destroyed) return state.player;
 
-    // Prende un nodo disponibile
-    const node = shoukaku.options.nodes.length > 0
-        ? shoukaku.getIdealNode()
-        : null;
+    const node = getAvailableNode();
+    if (!node) throw new Error("Nessun nodo Lavalink disponibile. Riprova tra qualche secondo.");
 
-    if (!node) throw new Error("Nessun nodo Lavalink disponibile al momento.");
-
+    // ── Shoukaku v4: joinVoiceChannel è su shoukaku ──
     const player = await shoukaku.joinVoiceChannel({
         guildId:   guild.id,
         channelId: voiceChannel.id,
-        shardId:   0,
+        shardId:   guild.shardId ?? 0,
     });
 
     // Evento: traccia finita → prossima
-    player.on("end", () => playNext(guild.id));
-
-    // Evento: errore player
-    player.on("exception", (error) => {
-        console.error("[LAVALINK] Eccezione:", error?.message);
-        getMusicState(guild.id).textChannel
-            ?.send("⚠️ Errore durante la riproduzione. Salto alla prossima...").catch(() => {});
+    player.on("end", () => {
+        const s = getMusicState(guild.id);
+        s.isPlaying = false;
         playNext(guild.id);
     });
 
-    // Evento: player si è bloccato (stuck)
+    // Evento: eccezione Lavalink
+    player.on("exception", (data) => {
+        console.error("[LAVALINK] Eccezione:", data?.exception?.message ?? data);
+        const s = getMusicState(guild.id);
+        s.isPlaying = false;
+        s.textChannel?.send("⚠️ Errore durante la riproduzione. Salto alla prossima...").catch(() => {});
+        playNext(guild.id);
+    });
+
+    // Evento: player bloccato
     player.on("stuck", () => {
         console.warn("[LAVALINK] Player bloccato, salto...");
+        const s = getMusicState(guild.id);
+        s.isPlaying = false;
         playNext(guild.id);
+    });
+
+    // Evento: player distrutto (disconnessione forzata)
+    player.on("closed", () => {
+        console.warn("[LAVALINK] Player chiuso.");
+        const s = getMusicState(guild.id);
+        s.player    = null;
+        s.isPlaying = false;
     });
 
     state.player = player;
@@ -342,22 +383,24 @@ const client = new Client({
     ],
 });
 
-// ── Shoukaku (Lavalink client) ────────────────
+// ── Shoukaku v4 ───────────────────────────────
 const shoukaku = new Shoukaku(
     new Connectors.DiscordJS(client),
     LAVALINK_NODES,
     {
-        moveOnDisconnect: true,
-        resumable:        false,
-        resumableTimeout: 30,
-        reconnectTries:   3,
-        restTimeout:      10000,
+        moveOnDisconnect:  true,
+        resumable:         false,
+        resumableTimeout:  30,
+        reconnectTries:    5,
+        reconnectInterval: 5,
+        restTimeout:       15000,
+        userAgent:         "Tricolore-Bot/1.0",
     }
 );
 
 shoukaku.on("ready",      (name)        => console.log(`[LAVALINK] Nodo connesso: ${name}`));
-shoukaku.on("error",      (name, error) => console.error(`[LAVALINK] Errore nodo ${name}:`, error.message));
-shoukaku.on("disconnect", (name)        => console.warn(`[LAVALINK] Nodo disconnesso: ${name}`));
+shoukaku.on("error",      (name, error) => console.error(`[LAVALINK] Errore nodo "${name}":`, error?.message ?? error));
+shoukaku.on("disconnect", (name, moved) => console.warn(`[LAVALINK] Nodo disconnesso: ${name} | moved=${moved}`));
 
 // ── Ready ─────────────────────────────────────
 client.once("ready", async () => {
@@ -393,7 +436,7 @@ client.on("interactionCreate", async (interaction) => {
         }
 
         if (embeds.length === 0) {
-            await interaction.editReply({ content: "⚠️ Nessuna notizia disponibile." });
+            await interaction.editReply({ content: "⚠️ Nessuna notizia disponibile al momento." });
             return;
         }
         await interaction.editReply({ embeds });
@@ -413,6 +456,7 @@ client.on("interactionCreate", async (interaction) => {
             await ensureLavalinkPlayer(guild, voiceChannel);
             await interaction.reply({ content: `🎙️ Entrato nel canale **${voiceChannel.name}**!` });
         } catch (err) {
+            console.error("[JOIN]", err.message);
             await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
         }
         return;
@@ -425,11 +469,12 @@ client.on("interactionCreate", async (interaction) => {
             await interaction.reply({ content: "❌ Non sono in nessun canale vocale!", ephemeral: true });
             return;
         }
-        state.queue   = [];
-        state.current = null;
-        await state.player.stopTrack();
+        try { await state.player.stopTrack(); } catch {}
         shoukaku.leaveVoiceChannel(guild.id);
-        state.player = null;
+        state.player    = null;
+        state.queue     = [];
+        state.current   = null;
+        state.isPlaying = false;
         musicStates.delete(guild.id);
         await interaction.reply({ content: "👋 Uscito dal canale vocale e coda svuotata." });
         return;
@@ -452,32 +497,59 @@ client.on("interactionCreate", async (interaction) => {
             state.textChannel = interaction.channel;
             player = await ensureLavalinkPlayer(guild, voiceChannel);
         } catch (err) {
+            console.error("[PLAY] ensureLavalinkPlayer:", err.message);
             await interaction.editReply({ content: `❌ ${err.message}` });
             return;
         }
 
-        // Cerca la traccia sul nodo Lavalink
-        const node   = shoukaku.getIdealNode();
+        // ── Shoukaku v4: la ricerca si fa tramite il nodo, non player ──
+        const node  = getAvailableNode();
+        if (!node) {
+            await interaction.editReply({ content: "❌ Nessun nodo Lavalink disponibile." });
+            return;
+        }
+
         const isUrl  = /^https?:\/\//.test(query);
+        // ytsearch: per ricerche testo, link diretto altrimenti
         const search = isUrl ? query : `ytsearch:${query}`;
 
         let result;
         try {
+            // ── Shoukaku v4: node.rest.resolve(query) ──
             result = await node.rest.resolve(search);
         } catch (err) {
+            console.error("[PLAY] resolve:", err.message);
             await interaction.editReply({ content: "⚠️ Errore durante la ricerca. Riprova." });
             return;
         }
 
-        if (!result || !result.tracks?.length) {
+        if (!result || !result.data) {
             await interaction.editReply({ content: `⚠️ Nessun risultato per: **${query}**` });
             return;
         }
 
         const state  = getMusicState(guild.id);
-        const tracks = result.loadType === "PLAYLIST_LOADED"
-            ? result.tracks
-            : [result.tracks[0]];
+
+        // ── Shoukaku v4: result.loadType + result.data ──
+        let tracks = [];
+        switch (result.loadType) {
+            case "track":
+                tracks = [result.data];
+                break;
+            case "search":
+                tracks = result.data.length > 0 ? [result.data[0]] : [];
+                break;
+            case "playlist":
+                tracks = result.data.tracks ?? [];
+                break;
+            default:
+                break;
+        }
+
+        if (tracks.length === 0) {
+            await interaction.editReply({ content: `⚠️ Nessun risultato per: **${query}**` });
+            return;
+        }
 
         for (const t of tracks) {
             state.queue.push({
@@ -485,26 +557,38 @@ client.on("interactionCreate", async (interaction) => {
                 title:       t.info.title,
                 uri:         t.info.uri,
                 duration:    t.info.length,
-                thumbnail:   t.info.artworkUrl ?? `https://img.youtube.com/vi/${t.info.identifier}/hqdefault.jpg`,
+                thumbnail:   t.info.artworkUrl
+                             ?? (t.info.sourceName === "youtube"
+                                 ? `https://img.youtube.com/vi/${t.info.identifier}/hqdefault.jpg`
+                                 : null),
                 requestedBy: interaction.user.username,
             });
         }
 
-        const isPlaying = player.track !== null && !player.paused;
-
-        if (!isPlaying) {
-            await interaction.editReply({ content: `🎵 Caricamento di **${tracks[0].info.title}**...` });
+        // Se non sta già riproducendo, avvia subito
+        if (!state.isPlaying) {
+            await interaction.editReply({
+                content: tracks.length > 1
+                    ? `🎵 Playlist aggiunta: **${tracks.length} brani**. Avvio...`
+                    : `🎵 Caricamento di **${tracks[0].info.title}**...`,
+            });
             playNext(guild.id);
         } else {
+            const t0    = tracks[0];
             const embed = new EmbedBuilder()
                 .setColor(0x1db954)
                 .setAuthor({ name: tracks.length > 1 ? `➕  Playlist aggiunta (${tracks.length} brani)` : "➕  Aggiunto alla coda" })
-                .setTitle(tracks[0].info.title.slice(0, 256))
-                .setURL(tracks[0].info.uri)
-                .setThumbnail(`https://img.youtube.com/vi/${tracks[0].info.identifier}/hqdefault.jpg`)
+                .setTitle(t0.info.title.slice(0, 256))
+                .setURL(t0.info.uri)
+                .setThumbnail(
+                    t0.info.artworkUrl
+                    ?? (t0.info.sourceName === "youtube"
+                        ? `https://img.youtube.com/vi/${t0.info.identifier}/hqdefault.jpg`
+                        : null)
+                )
                 .addFields(
-                    { name: "Durata",    value: formatDuration(tracks[0].info.length), inline: true },
-                    { name: "Posizione", value: `#${state.queue.length}`,              inline: true },
+                    { name: "⏱ Durata",    value: formatDuration(t0.info.length), inline: true },
+                    { name: "📋 Posizione", value: `#${state.queue.length}`,        inline: true },
                 )
                 .setFooter({ text: "Tricolore Music · Lavalink" })
                 .setTimestamp();
@@ -520,21 +604,23 @@ client.on("interactionCreate", async (interaction) => {
             await interaction.reply({ content: "❌ Nessuna canzone in riproduzione.", ephemeral: true });
             return;
         }
+        const skippedTitle = state.current.title;
         const prevLoop = state.loop;
-        if (state.loop === "track") state.loop = "none";
-        await state.player.stopTrack();
+        if (state.loop === "track") state.loop = "none"; // salta anche se in loop traccia
+        try { await state.player.stopTrack(); } catch {}
         state.loop = prevLoop;
-        await interaction.reply({ content: `⏭️ **${state.current.title}** saltata.` });
+        await interaction.reply({ content: `⏭️ **${skippedTitle}** saltata.` });
         return;
     }
 
     // ── /stop ─────────────────────────────────
     if (commandName === "stop") {
         const state = getMusicState(guild.id);
-        state.queue   = [];
-        state.current = null;
-        state.loop    = "none";
-        await state.player?.stopTrack();
+        state.queue     = [];
+        state.current   = null;
+        state.loop      = "none";
+        state.isPlaying = false;
+        try { await state.player?.stopTrack(); } catch {}
         await interaction.reply({ content: "⏹️ Riproduzione fermata e coda svuotata." });
         return;
     }
@@ -542,8 +628,12 @@ client.on("interactionCreate", async (interaction) => {
     // ── /pause ────────────────────────────────
     if (commandName === "pause") {
         const state = getMusicState(guild.id);
-        if (!state.player || state.player.paused || !state.current) {
+        if (!state.player || !state.isPlaying) {
             await interaction.reply({ content: "❌ Nessuna canzone in riproduzione.", ephemeral: true });
+            return;
+        }
+        if (state.player.paused) {
+            await interaction.reply({ content: "❌ La riproduzione è già in pausa.", ephemeral: true });
             return;
         }
         await state.player.setPaused(true);
@@ -578,12 +668,12 @@ client.on("interactionCreate", async (interaction) => {
             .setURL(track.uri)
             .setThumbnail(track.thumbnail ?? null)
             .addFields(
-                { name: "Durata",       value: formatDuration(track.duration), inline: true },
-                { name: "Richiesto da", value: track.requestedBy,              inline: true },
-                { name: "Volume",       value: `${state.volume}%`,             inline: true },
-                { name: "Loop",         value: state.loop,                     inline: true },
-                { name: "Shuffle",      value: state.shuffle ? "✅" : "❌",    inline: true },
-                { name: "In coda",      value: `${state.queue.length} brani`,  inline: true },
+                { name: "⏱ Durata",       value: formatDuration(track.duration), inline: true },
+                { name: "👤 Richiesto da", value: track.requestedBy,              inline: true },
+                { name: "🔊 Volume",       value: `${state.volume}%`,             inline: true },
+                { name: "🔁 Loop",         value: state.loop,                     inline: true },
+                { name: "🔀 Shuffle",      value: state.shuffle ? "✅" : "❌",    inline: true },
+                { name: "📋 In coda",      value: `${state.queue.length} brani`,  inline: true },
             )
             .setFooter({ text: "Tricolore Music · Lavalink" })
             .setTimestamp();
@@ -616,9 +706,9 @@ client.on("interactionCreate", async (interaction) => {
             .setTitle("🎶  Coda musicale")
             .setDescription(lines.join("\n").slice(0, 4096))
             .addFields(
-                { name: "Loop",    value: state.loop,                  inline: true },
-                { name: "Shuffle", value: state.shuffle ? "✅" : "❌", inline: true },
-                { name: "Volume",  value: `${state.volume}%`,          inline: true },
+                { name: "🔁 Loop",    value: state.loop,                  inline: true },
+                { name: "🔀 Shuffle", value: state.shuffle ? "✅" : "❌", inline: true },
+                { name: "🔊 Volume",  value: `${state.volume}%`,          inline: true },
             )
             .setFooter({ text: `${state.queue.length} brani in attesa · Tricolore Music` })
             .setTimestamp();
@@ -631,7 +721,8 @@ client.on("interactionCreate", async (interaction) => {
         const value = interaction.options.getInteger("valore", true);
         const state = getMusicState(guild.id);
         state.volume = value;
-        await state.player?.setVolume(value);
+        // ── Shoukaku v4: setGlobalVolume invece di setVolume ──
+        try { await state.player?.setGlobalVolume(value); } catch {}
         await interaction.reply({ content: `🔊 Volume impostato a **${value}%**.` });
         return;
     }
@@ -666,6 +757,7 @@ app.get("/health", (_req, res) => res.json({
     status:    "ok",
     uptime:    process.uptime(),
     sentNews:  sentNews.size,
+    nodes:     [...shoukaku.nodes.keys()],
     timestamp: new Date().toISOString(),
 }));
 app.listen(PORT, () => console.log(`[INFO] Express in ascolto sulla porta ${PORT}`));
