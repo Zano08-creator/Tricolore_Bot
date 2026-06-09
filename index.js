@@ -612,6 +612,27 @@ setInterval(() => {
 }, 14 * 60 * 1000);
 
 // ─────────────────────────────────────────────
+//  NODE WATCHDOG (ogni 30 secondi)
+//  Controlla che i nodi Lavalink siano connessi.
+//  Se un nodo è disconnesso lo riconnette subito,
+//  senza aspettare un comando dell'utente.
+// ─────────────────────────────────────────────
+setInterval(async () => {
+    for (const [name, node] of shoukaku.nodes) {
+        // state: 0 = Connecting, 1 = Connected, 2 = Disconnected
+        if (node.state !== 1) {
+            console.warn(`[WATCHDOG] Nodo "${name}" non connesso (state=${node.state}), riconnessione...`);
+            try {
+                await node.connect();
+                console.log(`[WATCHDOG] Nodo "${name}" riconnesso.`);
+            } catch (err) {
+                console.error(`[WATCHDOG] Riconnessione "${name}" fallita:`, err.message);
+            }
+        }
+    }
+}, 30 * 1000);
+
+// ─────────────────────────────────────────────
 //  GESTIONE ERRORI GLOBALI
 // ─────────────────────────────────────────────
 process.on("unhandledRejection", r => console.error("[UNHANDLED]", r));
