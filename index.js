@@ -28,7 +28,7 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 const LAVALINK_NODES = [
     { name: "serenetia", url: "lavalinkv4.serenetia.com",    auth: "https://seretia.link/discord",  port: 443, secure: true },
     { name: "jirayu",    url: "lavalink.jirayu.net",         auth: "youshallnotpass",               port: 443, secure: true },
-    { name: "lavalink4",  url: "lavalink.devamop.com",           auth: "DevamOP",                           port: 443, secure: true },
+    { name: "lavalink4",  url: "lavalink.oops.wtf",               auth: "www.lavalink.oops.wtf",             port: 443, secure: true },
     { name: "trinium",   url: "lavalink-v4.triniumhost.com", auth: "free",                          port: 443, secure: true },
 ];
 
