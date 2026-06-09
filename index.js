@@ -28,8 +28,7 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 const LAVALINK_NODES = [
     { name: "serenetia", url: "lavalinkv4.serenetia.com",    auth: "https://seretia.link/discord",  port: 443, secure: true },
     { name: "jirayu",    url: "lavalink.jirayu.net",         auth: "youshallnotpass",               port: 443, secure: true },
-    { name: "heavencloud", url: "lavalink.heavencloud.in",            auth: "heavencloud",                       port: 443, secure: true },
-    { name: "heavencloud-us", url: "us.lavalink.heavencloud.in",         auth: "heavencloud",                       port: 443, secure: true },
+    { name: "ajieblogs",  url: "lava-v4.ajieblogs.eu.org",        auth: "https://dsc.gg/ajidevserver",       port: 443, secure: true },
     { name: "trinium",   url: "lavalink-v4.triniumhost.com", auth: "free",                          port: 443, secure: true },
 ];
 
