@@ -614,19 +614,22 @@ setInterval(() => {
 // ─────────────────────────────────────────────
 //  NODE WATCHDOG (ogni 30 secondi)
 //  Controlla che i nodi Lavalink siano connessi.
-//  Se un nodo è disconnesso lo riconnette subito,
-//  senza aspettare un comando dell'utente.
+//  Se un nodo è disconnesso lo rimuove e lo
+//  riaggiunge forzando una nuova connessione.
 // ─────────────────────────────────────────────
 setInterval(async () => {
-    for (const [name, node] of shoukaku.nodes) {
+    for (const nodeConfig of LAVALINK_NODES) {
+        const node = shoukaku.nodes.get(nodeConfig.name);
         // state: 0 = Connecting, 1 = Connected, 2 = Disconnected
-        if (node.state !== 1) {
-            console.warn(`[WATCHDOG] Nodo "${name}" non connesso (state=${node.state}), riconnessione...`);
+        if (!node || node.state !== 1) {
+            console.warn(`[WATCHDOG] Nodo "${nodeConfig.name}" non connesso, riconnessione...`);
             try {
-                await node.connect();
-                console.log(`[WATCHDOG] Nodo "${name}" riconnesso.`);
+                if (node) shoukaku.removeNode(nodeConfig.name);
+                await new Promise(r => setTimeout(r, 500));
+                shoukaku.addNode(nodeConfig);
+                console.log(`[WATCHDOG] Nodo "${nodeConfig.name}" riaggiunto.`);
             } catch (err) {
-                console.error(`[WATCHDOG] Riconnessione "${name}" fallita:`, err.message);
+                console.error(`[WATCHDOG] Riconnessione "${nodeConfig.name}" fallita:`, err.message);
             }
         }
     }
