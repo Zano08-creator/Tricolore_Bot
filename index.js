@@ -59,6 +59,7 @@ function getMusicState(guildId) {
             shuffle:     false,
             textChannel: null,
             isPlaying:   false,
+            isKeepAlive: false,
         });
     }
     return musicStates.get(guildId);
@@ -203,6 +204,12 @@ async function ensurePlayer(guild, voiceChannel) {
 
     player.on("end", () => {
         const s = getMusicState(guild.id);
+        if (s.isKeepAlive) {
+            // Fine del ping silenzioso: ripristina volume e ignora
+            s.isKeepAlive = false;
+            try { state.player.setGlobalVolume(s.volume); } catch {}
+            return;
+        }
         s.isPlaying = false;
         playNext(guild.id);
     });
@@ -599,6 +606,18 @@ app.get("/health", (_req, res) => res.json({
     timestamp: new Date().toISOString(),
 }));
 
+// MP3 silenzioso minimo valido (44 bytes) servito in memoria
+const SILENT_MP3 = Buffer.from(
+    "fffb9000000000000000000000000000000000000000" +
+    "000000000000000000000000000000000000000000000000",
+    "hex"
+);
+app.get("/silence.mp3", (_req, res) => {
+    res.setHeader("Content-Type",   "audio/mpeg");
+    res.setHeader("Content-Length", SILENT_MP3.length);
+    res.end(SILENT_MP3);
+});
+
 app.listen(PORT, () => console.log(`[EXPRESS] Porta ${PORT} | URL: ${SERVICE_URL}`));
 
 // ─────────────────────────────────────────────
@@ -634,6 +653,35 @@ setInterval(async () => {
         }
     }
 }, 30 * 1000);
+
+// ─────────────────────────────────────────────
+//  VOICE KEEP-ALIVE (ogni 5 minuti)
+//  Riproduce un MP3 silenzioso servito da Express
+//  per mantenere il bot in call senza interferire
+//  con la coda musicale né con i comandi.
+// ─────────────────────────────────────────────
+setInterval(async () => {
+    for (const [guildId, state] of musicStates) {
+        if (!state.player || state.player.destroyed) continue;
+        if (state.isPlaying) continue;   // sta già suonando, non serve
+        if (state.isKeepAlive) continue; // ping già in corso
+        const node = getAvailableNode();
+        if (!node) continue;
+        try {
+            const silenceUrl = `${SERVICE_URL}/silence.mp3`;
+            const result = await node.rest.resolve(silenceUrl);
+            const track  = result?.loadType === "track" ? result.data : null;
+            if (!track) continue;
+            state.isKeepAlive = true;
+            await state.player.playTrack({ track: { encoded: track.encoded } });
+            await state.player.setGlobalVolume(0);
+            console.log(`[VOICE-KEEPALIVE] Ping silenzioso per guild ${guildId}`);
+        } catch (err) {
+            state.isKeepAlive = false;
+            console.warn(`[VOICE-KEEPALIVE] Fallito per guild ${guildId}:`, err.message);
+        }
+    }
+}, 5 * 60 * 1000);
 
 // ─────────────────────────────────────────────
 //  GESTIONE ERRORI GLOBALI
