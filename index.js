@@ -26,10 +26,10 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 //  LAVALINK NODES
 // ─────────────────────────────────────────────
 const LAVALINK_NODES = [
-    { name: "serenetia", url: "lavalinkv4.serenetia.com",    auth: "https://seretia.link/discord",  port: 443, secure: true },
-    { name: "jirayu",    url: "lavalink.jirayu.net",         auth: "youshallnotpass",               port: 443, secure: true },
-    { name: "ajieblogs",  url: "lava-v4.ajieblogs.eu.org",        auth: "https://dsc.gg/ajidevserver",       port: 80,  secure: false },
-    { name: "trinium",   url: "lavalink-v4.triniumhost.com", auth: "free",                          port: 443, secure: true },
+    { name: "serenetia-v4",  url: "lavalinkv4.serenetia.com",  auth: "https://dsc.gg/ajidevserver", port: 443, secure: true  },
+    { name: "serenetia-v4b", url: "lavalink.serenetia.com",    auth: "https://dsc.gg/ajidevserver", port: 443, secure: true  },
+    { name: "serenetia-v4c", url: "lavalink.serenetia.com",    auth: "https://dsc.gg/ajidevserver", port: 80,  secure: false },
+    { name: "jirayu",        url: "lavalink.jirayu.net",       auth: "youshallnotpass",             port: 443, secure: true  },
 ];
 
 // ─────────────────────────────────────────────
