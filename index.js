@@ -24,11 +24,82 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 
 // ─────────────────────────────────────────────
 //  LAVALINK NODES
+//  Fonte: https://lavalink.darrennathanael.com/ (aggiornato aprile 2026)
+//  Ordinati per priorità: SSL prima (più stabili), poi non-SSL come fallback
 // ─────────────────────────────────────────────
 const LAVALINK_NODES = [
-    { name: "serenetia", url: "lavalinkv4.serenetia.com", auth: "https://seretia.link/discord", port: 443, secure: true },
-    { name: "jirayu",    url: "lavalink.jirayu.net",      auth: "youshallnotpass",              port: 443, secure: true },
-    { name: "ajieblogs", url: "lava-v4.ajieblogs.eu.org", auth: "https://dsc.gg/ajidevserver",  port: 80,  secure: false },
+    // ── SSL ───────────────────────────────────────────────────────────────
+    {
+        name:   "serenetia-ssl",
+        url:    "lavalinkv4.serenetia.com",
+        auth:   "https://seretia.link/discord",
+        port:   443,
+        secure: true,
+    },
+    {
+        name:   "jirayu-ssl",
+        url:    "lavalink.jirayu.net",
+        auth:   "youshallnotpass",
+        port:   443,
+        secure: true,
+    },
+    {
+        name:   "millohost-ssl",
+        url:    "lava-v4.millohost.my.id",
+        auth:   "https://discord.gg/mjS5J2K3ep",
+        port:   443,
+        secure: true,
+    },
+    {
+        name:   "trinium-ssl",
+        url:    "lavalink-v4.triniumhost.com",
+        auth:   "free",
+        port:   443,
+        secure: true,
+    },
+    // ── Non-SSL (fallback) ────────────────────────────────────────────────
+    {
+        name:   "jirayu-nossl",
+        url:    "lavalink.jirayu.net",
+        auth:   "youshallnotpass",
+        port:   13592,      // ← porta corretta (era 443 nella versione precedente)
+        secure: false,
+    },
+    {
+        name:   "serenetia-nossl",
+        url:    "lavalinkv4.serenetia.com",
+        auth:   "https://seretia.link/discord",
+        port:   80,
+        secure: false,
+    },
+    {
+        name:   "g3v",
+        url:    "lava.g3v.co.uk",
+        auth:   "lavalinklol",
+        port:   9008,
+        secure: false,
+    },
+    {
+        name:   "nexcloud",
+        url:    "n3.nexcloud.in",
+        auth:   "nexcloud",
+        port:   2026,
+        secure: false,
+    },
+    {
+        name:   "vexanode",
+        url:    "omega.vexanode.cloud",
+        auth:   "https://discord.vexanode.cloud",
+        port:   2031,
+        secure: false,
+    },
+    {
+        name:   "trinium-nossl",
+        url:    "lavalink.triniumhost.com",
+        auth:   "free",
+        port:   4333,
+        secure: false,
+    },
 ];
 
 // ─────────────────────────────────────────────
@@ -206,7 +277,6 @@ async function ensurePlayer(guild, voiceChannel) {
         playNext(guild.id);
     });
 
-    // ── FIX: gestione errori traccia più dettagliata ──
     player.on("exception", (data) => {
         const s   = getMusicState(guild.id);
         const msg = data?.exception?.message ?? "Errore sconosciuto";
@@ -417,10 +487,6 @@ client.on("interactionCreate", async (interaction) => {
             const node = getAvailableNode();
             if (!node) { await interaction.editReply("❌ Nessun nodo audio disponibile."); return; }
 
-            // ── FIX: logica di ricerca con fallback ──────────────
-            // URL diretto → usalo as-is
-            // "sc: testo"  → forza SoundCloud
-            // testo generico → prova YouTube, poi fallback SoundCloud
             let searches;
             if (/^https?:\/\//.test(query)) {
                 searches = [query];
@@ -444,7 +510,6 @@ client.on("interactionCreate", async (interaction) => {
                 }
                 result = null;
             }
-            // ─────────────────────────────────────────────────────
 
             if (!result?.data) { await interaction.editReply(`⚠️ Nessun risultato per: **${query}**`); return; }
 
