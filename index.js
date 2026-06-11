@@ -591,12 +591,19 @@ const app         = express();
 const SERVICE_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
 
 app.get("/",       (_req, res) => res.send("Tricolore Bot – Online ✅"));
-app.get("/health", (_req, res) => res.json({
-    status:    "ok",
-    uptime:    Math.floor(process.uptime()),
-    nodes:     [...shoukaku.nodes.keys()],
-    timestamp: new Date().toISOString(),
-}));
+app.get("/health", (_req, res) => {
+    const nodeInfo = [...shoukaku.nodes.entries()].map(([name, node]) => ({
+        name,
+        state: node.state === 1 ? "connected" : node.state === 0 ? "connecting" : "disconnected",
+        stats: node.stats ?? null,
+    }));
+    res.json({
+        status:    "ok",
+        uptime:    Math.floor(process.uptime()),
+        nodes:     nodeInfo,
+        timestamp: new Date().toISOString(),
+    });
+});
 
 app.listen(PORT, () => console.log(`[EXPRESS] Porta ${PORT} | URL: ${SERVICE_URL}`));
 
