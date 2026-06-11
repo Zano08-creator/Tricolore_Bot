@@ -206,11 +206,30 @@ async function ensurePlayer(guild, voiceChannel) {
         playNext(guild.id);
     });
 
+    // ── FIX: gestione errori traccia più dettagliata ──
     player.on("exception", (data) => {
-        const s = getMusicState(guild.id);
-        console.error("[LAVALINK] Eccezione:", data?.exception?.message ?? data);
+        const s   = getMusicState(guild.id);
+        const msg = data?.exception?.message ?? "Errore sconosciuto";
+        console.error("[LAVALINK] Eccezione:", msg);
         s.isPlaying = false;
-        s.textChannel?.send("⚠️ Errore riproduzione. Salto alla prossima...").catch(() => {});
+
+        const isYtBlock =
+            msg.includes("Something broke") ||
+            msg.includes("403")             ||
+            msg.includes("429")             ||
+            msg.includes("blocked")         ||
+            msg.includes("Sign in")         ||
+            msg.includes("unavailable");
+
+        if (isYtBlock) {
+            const title = s.current?.title ?? "...";
+            s.textChannel?.send(
+                `⚠️ **YouTube ha bloccato questa traccia.**\n` +
+                `Prova con \`/play sc: ${title}\` per cercare su SoundCloud, oppure incolla un link diretto.`
+            ).catch(() => {});
+        } else {
+            s.textChannel?.send("⚠️ Errore riproduzione. Salto alla prossima...").catch(() => {});
+        }
         playNext(guild.id);
     });
 
@@ -250,8 +269,8 @@ const commands = [
 
     // Musica
     new SlashCommandBuilder()
-        .setName("play").setDescription("Riproduce una canzone (URL o ricerca)")
-        .addStringOption(o => o.setName("query").setDescription("URL o nome canzone").setRequired(true))
+        .setName("play").setDescription("Riproduce una canzone (URL o ricerca). Usa 'sc: nome' per SoundCloud")
+        .addStringOption(o => o.setName("query").setDescription("URL, nome canzone, oppure 'sc: nome' per SoundCloud").setRequired(true))
         .toJSON(),
     new SlashCommandBuilder().setName("skip")      .setDescription("Salta la canzone corrente").toJSON(),
     new SlashCommandBuilder().setName("stop")      .setDescription("Ferma e svuota la coda").toJSON(),
@@ -398,8 +417,35 @@ client.on("interactionCreate", async (interaction) => {
             const node = getAvailableNode();
             if (!node) { await interaction.editReply("❌ Nessun nodo audio disponibile."); return; }
 
-            const search = /^https?:\/\//.test(query) ? query : `ytsearch:${query}`;
-            const result = await node.rest.resolve(search).catch(() => null);
+            // ── FIX: logica di ricerca con fallback ──────────────
+            // URL diretto → usalo as-is
+            // "sc: testo"  → forza SoundCloud
+            // testo generico → prova YouTube, poi fallback SoundCloud
+            let searches;
+            if (/^https?:\/\//.test(query)) {
+                searches = [query];
+            } else if (query.toLowerCase().startsWith("sc:")) {
+                searches = [`scsearch:${query.slice(3).trim()}`];
+            } else {
+                searches = [`ytsearch:${query}`, `scsearch:${query}`];
+            }
+
+            let result = null;
+            let usedSource = "YouTube";
+            for (const search of searches) {
+                result = await node.rest.resolve(search).catch(() => null);
+                if (
+                    result?.data &&
+                    result.loadType !== "error" &&
+                    result.loadType !== "empty"
+                ) {
+                    usedSource = search.startsWith("scsearch") ? "SoundCloud" : "YouTube";
+                    break;
+                }
+                result = null;
+            }
+            // ─────────────────────────────────────────────────────
+
             if (!result?.data) { await interaction.editReply(`⚠️ Nessun risultato per: **${query}**`); return; }
 
             let tracks = [];
@@ -419,14 +465,15 @@ client.on("interactionCreate", async (interaction) => {
                                     ? `https://img.youtube.com/vi/${t.info.identifier}/hqdefault.jpg`
                                     : null),
                     requestedBy: interaction.user.username,
+                    source:      usedSource,
                 });
             }
 
             if (!state.isPlaying) {
                 await interaction.editReply(
                     tracks.length > 1
-                        ? `🎵 Playlist aggiunta: **${tracks.length} brani**. Avvio in corso...`
-                        : `🎵 Caricamento: **${tracks[0].info.title}**...`
+                        ? `🎵 Playlist aggiunta: **${tracks.length} brani** da ${usedSource}. Avvio in corso...`
+                        : `🎵 Caricamento: **${tracks[0].info.title}** (${usedSource})...`
                 );
                 playNext(guild.id);
             } else {
@@ -439,6 +486,7 @@ client.on("interactionCreate", async (interaction) => {
                         .addFields(
                             { name: "⏱ Durata",    value: formatDuration(t0.info.length), inline: true },
                             { name: "📋 Posizione", value: `#${state.queue.length}`,       inline: true },
+                            { name: "🎵 Sorgente",  value: usedSource,                     inline: true },
                         )
                         .setFooter({ text: "Tricolore Music" }).setTimestamp()
                 ]});
@@ -619,14 +667,10 @@ setInterval(() => {
 
 // ─────────────────────────────────────────────
 //  NODE WATCHDOG (ogni 30 secondi)
-//  Controlla che i nodi Lavalink siano connessi.
-//  Se un nodo è disconnesso lo rimuove e lo
-//  riaggiunge forzando una nuova connessione.
 // ─────────────────────────────────────────────
 setInterval(async () => {
     for (const nodeConfig of LAVALINK_NODES) {
         const node = shoukaku.nodes.get(nodeConfig.name);
-        // state: 0 = Connecting, 1 = Connected, 2 = Disconnected
         if (!node || node.state !== 1) {
             console.warn(`[WATCHDOG] Nodo "${nodeConfig.name}" non connesso, riconnessione...`);
             try {
@@ -640,7 +684,6 @@ setInterval(async () => {
         }
     }
 }, 30 * 1000);
-
 
 // ─────────────────────────────────────────────
 //  GESTIONE ERRORI GLOBALI
