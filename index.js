@@ -59,7 +59,6 @@ function getMusicState(guildId) {
             shuffle:     false,
             textChannel: null,
             isPlaying:   false,
-            isKeepAlive: false,
         });
     }
     return musicStates.get(guildId);
@@ -204,11 +203,6 @@ async function ensurePlayer(guild, voiceChannel) {
 
     player.on("end", () => {
         const s = getMusicState(guild.id);
-        if (s.isKeepAlive) {
-            s.isKeepAlive = false;
-            try { state.player.setGlobalVolume(s.volume); } catch {}
-            return;
-        }
         s.isPlaying = false;
         playNext(guild.id);
     });
@@ -641,36 +635,6 @@ setInterval(async () => {
     }
 }, 30 * 1000);
 
-// ─────────────────────────────────────────────
-//  VOICE KEEP-ALIVE (ogni 4 minuti)
-//  Riproduce un MP3 silenzioso pubblico su GitHub
-//  per mantenere il bot in call senza audio udibile.
-//  L'evento "end" con isKeepAlive=true viene ignorato
-//  da playNext, quindi la coda non viene toccata.
-// ─────────────────────────────────────────────
-const SILENCE_URL = "https://github.com/anars/blank-audio/raw/master/1-second-of-silence.mp3";
-
-setInterval(async () => {
-    for (const [guildId, state] of musicStates) {
-        if (!state.player || state.player.destroyed) continue;
-        if (state.isPlaying) continue;
-        if (state.isKeepAlive) continue;
-        const node = getAvailableNode();
-        if (!node) continue;
-        try {
-            const result = await node.rest.resolve(SILENCE_URL);
-            const track  = result?.loadType === "track" ? result.data : null;
-            if (!track) { console.warn(`[VOICE-KEEPALIVE] Nessuna traccia risolta per guild ${guildId}`); continue; }
-            state.isKeepAlive = true;
-            await state.player.playTrack({ track: { encoded: track.encoded } });
-            await state.player.setGlobalVolume(0);
-            console.log(`[VOICE-KEEPALIVE] Ping silenzioso per guild ${guildId}`);
-        } catch (err) {
-            state.isKeepAlive = false;
-            console.warn(`[VOICE-KEEPALIVE] Fallito per guild ${guildId}:`, err.message);
-        }
-    }
-}, 4 * 60 * 1000);
 
 // ─────────────────────────────────────────────
 //  GESTIONE ERRORI GLOBALI
