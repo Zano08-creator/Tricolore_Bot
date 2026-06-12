@@ -411,13 +411,17 @@ client.on("interactionCreate", async (interaction) => {
         try {
             const state = getMusicState(guild.id);
             state.textChannel = interaction.channel;
-            if (state.player && !state.player.destroyed) {
+
+            // Pulizia completa dello stato precedente (fix reconnect dopo disconnect)
+            if (state.player) {
                 try { await state.player.stopTrack(); } catch {}
-                shoukaku.leaveVoiceChannel(guild.id);
-                state.player    = null;
-                state.isPlaying = false;
+                try { state.player.clean(); } catch {}
             }
-            await new Promise(r => setTimeout(r, 500));
+            try { shoukaku.leaveVoiceChannel(guild.id); } catch {}
+            state.player    = null;
+            state.isPlaying = false;
+
+            await new Promise(r => setTimeout(r, 800));
             await ensurePlayer(guild, vc);
             await interaction.reply(`🎙️ Entrato in **${vc.name}**!`);
         } catch (err) {
