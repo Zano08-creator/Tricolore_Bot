@@ -24,83 +24,48 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 
 // ─────────────────────────────────────────────
 //  LAVALINK NODES
-//  Fonte: https://lavalink.darrennathanael.com/ (aggiornato aprile 2026)
-//  Ordinati per priorità: SSL prima (più stabili), poi non-SSL come fallback
+//
+//  Priorità:
+//    1. Nodo self-hosted su Render (se LAVALINK_HOST è impostato) → sempre preferito
+//    2. serenetia SSL  → il più affidabile tra i pubblici
+//    3. serenetia no-SSL → fallback stesso server
+//    4. millohost SSL   → secondo server pubblico stabile
+//    5. trinium SSL     → terzo server pubblico
+//
+//  Per aggiungere il tuo nodo su Render imposta queste env vars
+//  nel servizio del BOT (non di Lavalink):
+//    LAVALINK_HOST  = nome-app-lavalink.onrender.com
+//    LAVALINK_PASS  = la password scelta (default: youshallnotpass)
+//    LAVALINK_PORT  = 443  (Render espone sempre 443 esternamente)
+//    LAVALINK_SSL   = true
 // ─────────────────────────────────────────────
-const LAVALINK_NODES = [
-    // ── SSL ───────────────────────────────────────────────────────────────
-    {
-        name:   "serenetia-ssl",
-        url:    "lavalinkv4.serenetia.com",
-        auth:   "https://seretia.link/discord",
-        port:   443,
-        secure: true,
-    },
-    {
-        name:   "jirayu-ssl",
-        url:    "lavalink.jirayu.net",
-        auth:   "youshallnotpass",
-        port:   443,
-        secure: true,
-    },
-    {
-        name:   "millohost-ssl",
-        url:    "lava-v4.millohost.my.id",
-        auth:   "https://discord.gg/mjS5J2K3ep",
-        port:   443,
-        secure: true,
-    },
-    {
-        name:   "trinium-ssl",
-        url:    "lavalink-v4.triniumhost.com",
-        auth:   "free",
-        port:   443,
-        secure: true,
-    },
-    // ── Non-SSL (fallback) ────────────────────────────────────────────────
-    {
-        name:   "jirayu-nossl",
-        url:    "lavalink.jirayu.net",
-        auth:   "youshallnotpass",
-        port:   13592,      // ← porta corretta (era 443 nella versione precedente)
-        secure: false,
-    },
-    {
-        name:   "serenetia-nossl",
-        url:    "lavalinkv4.serenetia.com",
-        auth:   "https://seretia.link/discord",
-        port:   80,
-        secure: false,
-    },
-    {
-        name:   "g3v",
-        url:    "lava.g3v.co.uk",
-        auth:   "lavalinklol",
-        port:   9008,
-        secure: false,
-    },
-    {
-        name:   "nexcloud",
-        url:    "n3.nexcloud.in",
-        auth:   "nexcloud",
-        port:   2026,
-        secure: false,
-    },
-    {
-        name:   "vexanode",
-        url:    "omega.vexanode.cloud",
-        auth:   "https://discord.vexanode.cloud",
-        port:   2031,
-        secure: false,
-    },
-    {
-        name:   "trinium-nossl",
-        url:    "lavalink.triniumhost.com",
-        auth:   "free",
-        port:   4333,
-        secure: false,
-    },
-];
+function buildNodeList() {
+    const nodes = [];
+
+    // Nodo self-hosted (priorità massima)
+    if (process.env.LAVALINK_HOST) {
+        nodes.push({
+            name:   "self-hosted",
+            url:    process.env.LAVALINK_HOST,
+            auth:   process.env.LAVALINK_PASS || "youshallnotpass",
+            port:   parseInt(process.env.LAVALINK_PORT || "443", 10),
+            secure: (process.env.LAVALINK_SSL ?? "true") !== "false",
+        });
+        console.log(`[CONFIG] Nodo self-hosted: ${process.env.LAVALINK_HOST}`);
+    }
+
+    // Nodi pubblici come fallback
+    nodes.push(
+        { name: "serenetia-ssl",  url: "lavalinkv4.serenetia.com",   auth: "https://seretia.link/discord",     port: 443, secure: true  },
+        { name: "serenetia-nossl",url: "lavalinkv4.serenetia.com",   auth: "https://seretia.link/discord",     port: 80,  secure: false },
+        { name: "millohost-ssl",  url: "lava-v4.millohost.my.id",    auth: "https://discord.gg/mjS5J2K3ep",   port: 443, secure: true  },
+        { name: "trinium-ssl",    url: "lavalink-v4.triniumhost.com", auth: "free",                            port: 443, secure: true  },
+    );
+
+    return nodes;
+}
+
+const LAVALINK_NODES = buildNodeList();
 
 // ─────────────────────────────────────────────
 //  FEED RSS ANSA
@@ -145,7 +110,7 @@ function formatDuration(ms) {
 }
 
 // ─────────────────────────────────────────────
-//  PLAYER: avvia la prossima traccia musicale
+//  PLAYER
 // ─────────────────────────────────────────────
 async function playNext(guildId) {
     const state = getMusicState(guildId);
@@ -201,7 +166,7 @@ async function playNext(guildId) {
 }
 
 // ─────────────────────────────────────────────
-//  AI: Groq (solo risposta scritta)
+//  AI: Groq
 // ─────────────────────────────────────────────
 const GROQ_KEY = process.env.GROQ_KEY;
 
@@ -323,7 +288,6 @@ async function ensurePlayer(guild, voiceChannel) {
 //  SLASH COMMANDS
 // ─────────────────────────────────────────────
 const commands = [
-    // News
     new SlashCommandBuilder()
         .setName("news").setDescription("Mostra le ultime notizie ANSA")
         .addStringOption(o =>
@@ -336,11 +300,9 @@ const commands = [
                 { name: "Tutte",    value: "tutte"    },
              )
         ).toJSON(),
-
-    // Musica
     new SlashCommandBuilder()
-        .setName("play").setDescription("Riproduce una canzone (URL o ricerca). Usa 'sc: nome' per SoundCloud")
-        .addStringOption(o => o.setName("query").setDescription("URL, nome canzone, oppure 'sc: nome' per SoundCloud").setRequired(true))
+        .setName("play").setDescription("Riproduce una canzone. Usa 'sc: nome' per SoundCloud")
+        .addStringOption(o => o.setName("query").setDescription("URL, nome canzone, oppure 'sc: nome'").setRequired(true))
         .toJSON(),
     new SlashCommandBuilder().setName("skip")      .setDescription("Salta la canzone corrente").toJSON(),
     new SlashCommandBuilder().setName("stop")      .setDescription("Ferma e svuota la coda").toJSON(),
@@ -365,8 +327,6 @@ const commands = [
                 { name: "Coda intera", value: "queue" },
              )
         ).toJSON(),
-
-    // AI (solo testo)
     new SlashCommandBuilder()
         .setName("chiedi").setDescription("Fai una domanda all'AI")
         .addStringOption(o => o.setName("domanda").setDescription("La tua domanda").setRequired(true))
@@ -410,7 +370,6 @@ client.on("interactionCreate", async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
     const { commandName, guild } = interaction;
 
-    // ── /news ──────────────────────────────────
     if (commandName === "news") {
         await interaction.deferReply();
         const cat   = interaction.options.getString("categoria") || "tutte";
@@ -439,7 +398,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /join ──────────────────────────────────
     if (commandName === "join") {
         const vc = await getMemberVoiceChannel(interaction);
         if (!vc) { await interaction.reply({ content: "❌ Devi essere in un canale vocale!", ephemeral: true }); return; }
@@ -461,7 +419,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /leave ─────────────────────────────────
     if (commandName === "leave") {
         const state = getMusicState(guild.id);
         if (!state.player || state.player.destroyed) {
@@ -474,7 +431,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /play ──────────────────────────────────
     if (commandName === "play") {
         const query = interaction.options.getString("query", true);
         await interaction.deferReply();
@@ -500,11 +456,7 @@ client.on("interactionCreate", async (interaction) => {
             let usedSource = "YouTube";
             for (const search of searches) {
                 result = await node.rest.resolve(search).catch(() => null);
-                if (
-                    result?.data &&
-                    result.loadType !== "error" &&
-                    result.loadType !== "empty"
-                ) {
+                if (result?.data && result.loadType !== "error" && result.loadType !== "empty") {
                     usedSource = search.startsWith("scsearch") ? "SoundCloud" : "YouTube";
                     break;
                 }
@@ -562,7 +514,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /skip ──────────────────────────────────
     if (commandName === "skip") {
         const state = getMusicState(guild.id);
         if (!state.current) { await interaction.reply({ content: "❌ Nessuna canzone in riproduzione.", ephemeral: true }); return; }
@@ -575,7 +526,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /stop ──────────────────────────────────
     if (commandName === "stop") {
         const state = getMusicState(guild.id);
         state.queue     = [];
@@ -587,7 +537,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /pause ─────────────────────────────────
     if (commandName === "pause") {
         const state = getMusicState(guild.id);
         if (!state.player || !state.isPlaying) { await interaction.reply({ content: "❌ Nessuna canzone in riproduzione.", ephemeral: true }); return; }
@@ -597,7 +546,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /resume ────────────────────────────────
     if (commandName === "resume") {
         const state = getMusicState(guild.id);
         if (!state.player?.paused) { await interaction.reply({ content: "❌ Non è in pausa.", ephemeral: true }); return; }
@@ -606,7 +554,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /nowplaying ────────────────────────────
     if (commandName === "nowplaying") {
         const state = getMusicState(guild.id);
         if (!state.current) { await interaction.reply({ content: "❌ Nessuna canzone in riproduzione.", ephemeral: true }); return; }
@@ -627,7 +574,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /queue ─────────────────────────────────
     if (commandName === "queue") {
         const state = getMusicState(guild.id);
         if (!state.current && !state.queue.length) { await interaction.reply({ content: "📭 La coda è vuota.", ephemeral: true }); return; }
@@ -653,7 +599,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /volume ────────────────────────────────
     if (commandName === "volume") {
         const val   = interaction.options.getInteger("valore", true);
         const state = getMusicState(guild.id);
@@ -663,7 +608,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /loop ──────────────────────────────────
     if (commandName === "loop") {
         const mod = interaction.options.getString("modalita", true);
         getMusicState(guild.id).loop = mod;
@@ -672,7 +616,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /shuffle ───────────────────────────────
     if (commandName === "shuffle") {
         const state   = getMusicState(guild.id);
         state.shuffle = !state.shuffle;
@@ -680,7 +623,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // ── /chiedi ────────────────────────────────
     if (commandName === "chiedi") {
         const domanda = interaction.options.getString("domanda", true);
         await interaction.deferReply();
