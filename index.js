@@ -301,8 +301,15 @@ const commands = [
              )
         ).toJSON(),
     new SlashCommandBuilder()
-        .setName("play").setDescription("Riproduce una canzone. Usa 'sc: nome' per SoundCloud")
-        .addStringOption(o => o.setName("query").setDescription("URL, nome canzone, oppure 'sc: nome'").setRequired(true))
+        .setName("play").setDescription("Riproduce una canzone")
+        .addStringOption(o => o.setName("query").setDescription("URL o nome della canzone").setRequired(true))
+        .addStringOption(o =>
+            o.setName("sorgente").setDescription("Da dove cercare (default: YouTube)")
+             .addChoices(
+                { name: "🎵 YouTube",    value: "youtube"    },
+                { name: "🎶 SoundCloud", value: "soundcloud" },
+             )
+        )
         .toJSON(),
     new SlashCommandBuilder().setName("skip")      .setDescription("Salta la canzone corrente").toJSON(),
     new SlashCommandBuilder().setName("stop")      .setDescription("Ferma e svuota la coda").toJSON(),
@@ -432,7 +439,8 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (commandName === "play") {
-        const query = interaction.options.getString("query", true);
+        const query    = interaction.options.getString("query", true);
+        const sorgente = interaction.options.getString("sorgente") ?? "youtube";
         await interaction.deferReply();
         const vc = await getMemberVoiceChannel(interaction);
         if (!vc) { await interaction.editReply("❌ Devi essere in un canale vocale!"); return; }
@@ -446,8 +454,8 @@ client.on("interactionCreate", async (interaction) => {
             let searches;
             if (/^https?:\/\//.test(query)) {
                 searches = [query];
-            } else if (query.toLowerCase().startsWith("sc:")) {
-                searches = [`scsearch:${query.slice(3).trim()}`];
+            } else if (sorgente === "soundcloud") {
+                searches = [`scsearch:${query}`];
             } else {
                 searches = [`ytsearch:${query}`, `scsearch:${query}`];
             }
