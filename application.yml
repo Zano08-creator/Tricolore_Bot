@@ -1,0 +1,76 @@
+server:
+  port: 2333
+  address: 0.0.0.0
+
+lavalink:
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
+      repository: "https://maven.lavalink.dev/releases"
+
+  server:
+    password: "${LAVALINK_SERVER_PASSWORD:youshallnotpass}"
+    sources:
+      youtube: false
+      bandcamp: true
+      soundcloud: true
+      twitch: true
+      vimeo: true
+      http: true
+      local: false
+    filters:
+      volume: true
+      equalizer: true
+      karaoke: true
+      timescale: true
+      tremolo: true
+      vibrato: true
+      distortion: true
+      rotation: true
+      channelMix: true
+      lowPass: true
+    bufferDurationMs: 400
+    frameBufferDurationMs: 5000
+    opusEncodingQuality: 10
+    resamplingQuality: LOW
+    trackStuckThresholdMs: 10000
+    useSeekGhosting: true
+    youtubePlaylistLoadLimit: 6
+    playerUpdateInterval: 5
+    youtubeSearchEnabled: true
+    soundcloudSearchEnabled: true
+    gc-warnings: true
+
+# Il plugin youtube usa i nomi interni WEB_REMIX, WEB, ANDROID_VR ecc.
+# OAuth funziona automaticamente su tutti i client compatibili
+# quando refreshToken è impostato — non serve specificare client OAuth separati.
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    clients:
+      - WEB_REMIX    # = MUSIC, supporta OAuth
+      - WEB          # supporta OAuth
+      - ANDROID_VR   # supporta OAuth
+      - TVHTML5_SIMPLY
+    oauth:
+      enabled: true
+      skipInitialization: true
+      refreshToken: "${LAVALINK_YOUTUBE_REFRESH_TOKEN:}"
+
+metrics:
+  prometheus:
+    enabled: false
+    endpoint: /metrics
+
+sentry:
+  dsn: ""
+
+logging:
+  file:
+    path: ./logs/
+  level:
+    root: INFO
+    lavalink: INFO
+    dev.lavalink.youtube.http.YoutubeOauth2Handler: INFO
