@@ -1,17 +1,16 @@
 server:
   port: 2333
-  address: 0.0.0.0   # 0.0.0.0 obbligatorio su Render/Docker
+  address: 0.0.0.0
 
 lavalink:
   plugins:
-    # Plugin YouTube ufficiale aggiornato
     - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
       repository: "https://maven.lavalink.dev/releases"
 
   server:
     password: "${LAVALINK_SERVER_PASSWORD:youshallnotpass}"
     sources:
-      youtube: false       # disabilitato: usiamo il plugin sopra
+      youtube: false
       bandcamp: true
       soundcloud: true
       twitch: true
@@ -41,7 +40,6 @@ lavalink:
     soundcloudSearchEnabled: true
     gc-warnings: true
 
-# Configurazione plugin YouTube
 plugins:
   youtube:
     enabled: true
@@ -49,13 +47,13 @@ plugins:
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
     clients:
+      - WEB_OAUTH   # client OAuth — bypassa i blocchi YouTube
       - MUSIC
       - WEB
       - ANDROID_VR
-      - TVHTML5EMBEDDED
     oauth:
       enabled: true
-      skipInitialization: false
+      skipInitialization: true   # salta il flow, usiamo direttamente il token
       refreshToken: "${LAVALINK_YOUTUBE_REFRESH_TOKEN:}"
 
 metrics:
