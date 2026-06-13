@@ -4,8 +4,8 @@ server:
 
 lavalink:
   plugins:
-    # Plugin YouTube ufficiale (sostituisce la sorgente YouTube built-in deprecata)
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.11.2"
+    # Plugin YouTube ufficiale aggiornato
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
       repository: "https://maven.lavalink.dev/releases"
 
   server:
@@ -49,10 +49,14 @@ plugins:
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
     clients:
-      - MUSIC        # ytmusic — ottimo per ricerche, bassa probabilità di block
-      - WEB          # web standard
-      - ANDROID_VR   # raramente bannato da YT
+      - MUSIC
+      - WEB
+      - ANDROID_VR
       - TVHTML5EMBEDDED
+    oauth:
+      enabled: true
+      skipInitialization: false
+      # refreshToken: "incolla qui il token dopo il primo avvio"
 
 metrics:
   prometheus:
@@ -68,3 +72,4 @@ logging:
   level:
     root: INFO
     lavalink: INFO
+    dev.lavalink.youtube.http.YoutubeOauth2Handler: INFO
