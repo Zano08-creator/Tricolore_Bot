@@ -47,10 +47,11 @@ plugins:
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
     clients:
-      - MUSIC      # supporta OAuth, ottimo per ricerche
+      - MUSIC          # OAuth-compatible, ottimo per ricerche
+      - ANDROID_MUSIC  # OAuth-compatible, buon fallback
       - WEB
       - ANDROID_VR
-      - TV_EMBEDDED
+      - TVHTML5_SIMPLY
     oauth:
       enabled: true
       skipInitialization: true
@@ -71,3 +72,4 @@ logging:
     root: INFO
     lavalink: INFO
     dev.lavalink.youtube.http.YoutubeOauth2Handler: INFO
+  
