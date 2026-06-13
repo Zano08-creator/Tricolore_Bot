@@ -504,6 +504,8 @@ client.on("interactionCreate", async (interaction) => {
                         ? `🎵 Playlist aggiunta: **${tracks.length} brani** da ${usedSource}. Avvio in corso...`
                         : `🎵 Caricamento: **${tracks[0].info.title}** (${usedSource})...`
                 );
+                // Piccolo delay per permettere al player di stabilizzarsi dopo il join
+                await new Promise(r => setTimeout(r, 500));
                 playNext(guild.id);
             } else {
                 const t0 = tracks[0];
