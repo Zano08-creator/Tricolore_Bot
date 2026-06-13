@@ -56,7 +56,7 @@ plugins:
     oauth:
       enabled: true
       skipInitialization: false
-      # refreshToken: "incolla qui il token dopo il primo avvio"
+      refreshToken: "${LAVALINK_YOUTUBE_REFRESH_TOKEN:}"
 
 metrics:
   prometheus:
