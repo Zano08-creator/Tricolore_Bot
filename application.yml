@@ -47,13 +47,12 @@ plugins:
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
     clients:
-      - WEB_OAUTH   # client OAuth — bypassa i blocchi YouTube
       - MUSIC
       - WEB
       - ANDROID_VR
     oauth:
       enabled: true
-      skipInitialization: true   # salta il flow, usiamo direttamente il token
+      skipInitialization: true
       refreshToken: "${LAVALINK_YOUTUBE_REFRESH_TOKEN:}"
 
 metrics:
@@ -71,3 +70,4 @@ logging:
     root: INFO
     lavalink: INFO
     dev.lavalink.youtube.http.YoutubeOauth2Handler: INFO
+  
