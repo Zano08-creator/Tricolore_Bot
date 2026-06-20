@@ -47,10 +47,7 @@ plugins:
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
     clients:
-      - WEB_REMIX          # = YouTube Music, supporta OAuth
-      - WEB                # supporta OAuth
-      - ANDROID_VR         # supporta OAuth
-      - TVHTML5EMBEDDED    # ⬅️ FIX: "TVHTML5_SIMPLY" non è un client valido in 1.18.1
+      - WEB                # supporta OAuth e ricerca testuale
     oauth:
       enabled: true
       skipInitialization: false   # ⬅️ FIX: deve essere false la prima volta, per generare il link OAuth nei log
