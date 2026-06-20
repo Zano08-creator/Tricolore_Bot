@@ -8,7 +8,7 @@ lavalink:
   server:
     password: "${LAVALINK_SERVER_PASSWORD:youshallnotpass}"
     sources:
-      youtube: true          # ⬅️ FIX: era false, ora abilitato
+      youtube: false          # ⬅️ FIX: deve essere FALSE — disabilita il vecchio source built-in deprecato (senza OAuth) e lascia gestire YouTube solo al plugin dev.lavalink.youtube
       bandcamp: true
       soundcloud: true
       twitch: true
