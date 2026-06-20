@@ -1,16 +1,14 @@
 server:
   port: 2333
   address: 0.0.0.0
-
 lavalink:
   plugins:
     - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
       repository: "https://maven.lavalink.dev/releases"
-
   server:
     password: "${LAVALINK_SERVER_PASSWORD:youshallnotpass}"
     sources:
-      youtube: false
+      youtube: true          # ⬅️ FIX: era false, ora abilitato
       bandcamp: true
       soundcloud: true
       twitch: true
@@ -39,7 +37,6 @@ lavalink:
     youtubeSearchEnabled: true
     soundcloudSearchEnabled: true
     gc-warnings: true
-
 # Il plugin youtube usa i nomi interni WEB_REMIX, WEB, ANDROID_VR ecc.
 # OAuth funziona automaticamente su tutti i client compatibili
 # quando refreshToken è impostato — non serve specificare client OAuth separati.
@@ -50,23 +47,20 @@ plugins:
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
     clients:
-      - WEB_REMIX    # = MUSIC, supporta OAuth
-      - WEB          # supporta OAuth
-      - ANDROID_VR   # supporta OAuth
-      - TVHTML5_SIMPLY
+      - WEB_REMIX          # = YouTube Music, supporta OAuth
+      - WEB                # supporta OAuth
+      - ANDROID_VR         # supporta OAuth
+      - TVHTML5EMBEDDED    # ⬅️ FIX: "TVHTML5_SIMPLY" non è un client valido in 1.18.1
     oauth:
       enabled: true
-      skipInitialization: true
+      skipInitialization: false   # ⬅️ FIX: deve essere false la prima volta, per generare il link OAuth nei log
       refreshToken: "${LAVALINK_YOUTUBE_REFRESH_TOKEN:}"
-
 metrics:
   prometheus:
     enabled: false
     endpoint: /metrics
-
 sentry:
   dsn: ""
-
 logging:
   file:
     path: ./logs/
