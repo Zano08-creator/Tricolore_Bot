@@ -5,6 +5,8 @@ lavalink:
   plugins:
     - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
       repository: "https://maven.lavalink.dev/releases"
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.7.1"
+      repository: "https://maven.lavalink.dev/releases"
   server:
     password: "${LAVALINK_SERVER_PASSWORD:youshallnotpass}"
     sources:
@@ -52,6 +54,22 @@ plugins:
       enabled: true
       skipInitialization: false   # ⬅️ FIX: deve essere false la prima volta, per generare il link OAuth nei log
       refreshToken: "${LAVALINK_YOUTUBE_REFRESH_TOKEN:}"
+  lavasrc:
+    providers:                  # ordine di ricerca quando convertiamo da Spotify a stream reale
+      - "ytsearch:\"%ISRC%\""   # prova prima per codice ISRC (più precisa)
+      - "ytsearch:%QUERY%"      # poi ricerca normale su YouTube
+      - "scsearch:%QUERY%"      # infine fallback SoundCloud
+    sources:
+      spotify: true
+      applemusic: false
+      deezer: false
+      yandexmusic: false
+      flowerytts: false
+      youtube: false           # lasciamo gestire YouTube al plugin youtube-source, non a LavaSrc
+    spotify:
+      clientId: "${SPOTIFY_CLIENT_ID:}"
+      clientSecret: "${SPOTIFY_CLIENT_SECRET:}"
+      countryCode: "IT"
 metrics:
   prometheus:
     enabled: false
