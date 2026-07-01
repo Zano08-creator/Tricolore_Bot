@@ -217,6 +217,9 @@ async function ensurePlayer(guild, voiceChannel) {
         shardId:   guild.shardId ?? 0,
     });
 
+    // FIX: log per confermare a quale nodo il player è effettivamente collegato
+    console.log(`[MUSIC] Player collegato al nodo: ${player.node?.name ?? "sconosciuto"}`);
+
     player.on("end", () => {
         const s = getMusicState(guild.id);
         s.isPlaying = false;
@@ -435,8 +438,16 @@ client.on("interactionCreate", async (interaction) => {
             const state = getMusicState(guild.id);
             state.textChannel = interaction.channel;
             await ensurePlayer(guild, vc);
-            const node = getAvailableNode();
+
+            // FIX: usa il nodo a cui il player è EFFETTIVAMENTE collegato,
+            // non uno scelto a caso da getAvailableNode(). Prima, se il player
+            // veniva connesso da Shoukaku a un nodo (es. self-hosted con OAuth),
+            // ma la ricerca/resolve avveniva su un nodo diverso (es. un nodo
+            // pubblico di terzi), la traccia trovata non era compatibile col
+            // player -> riproduzione silenziosamente fallita.
+            const node = state.player?.node ?? getAvailableNode();
             if (!node) { await interaction.editReply("❌ Nessun nodo audio disponibile."); return; }
+            console.log(`[MUSIC] /play userà il nodo: ${node.name}`);
 
             // Logica ricerca: URL diretto → as-is | SoundCloud scelto → scsearch | default → ytsearch con fallback sc
             let searches;
@@ -451,10 +462,16 @@ client.on("interactionCreate", async (interaction) => {
             let result     = null;
             let usedSource = "YouTube";
             for (const search of searches) {
-                result = await node.rest.resolve(search).catch(() => null);
+                result = await node.rest.resolve(search).catch((err) => {
+                    console.error(`[MUSIC] Errore resolve "${search}":`, err.message);
+                    return null;
+                });
                 if (result?.data && result.loadType !== "error" && result.loadType !== "empty") {
                     usedSource = search.startsWith("scsearch") ? "SoundCloud" : "YouTube";
                     break;
+                }
+                if (result?.loadType === "error") {
+                    console.error(`[MUSIC] loadType error per "${search}":`, JSON.stringify(result.data));
                 }
                 result = null;
             }
@@ -506,6 +523,7 @@ client.on("interactionCreate", async (interaction) => {
                 ]});
             }
         } catch (err) {
+            console.error("[MUSIC] Errore /play:", err);
             await interaction.editReply(`❌ ${err.message}`);
         }
         return;
