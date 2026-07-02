@@ -20,6 +20,9 @@ const TOKEN     = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID || "1512928969849311272";
 const PORT      = process.env.PORT      || 3000;
 
+const SPOTIFY_CLIENT_ID     = process.env.SPOTIFY_CLIENT_ID;
+const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
+
 if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 
 // ─────────────────────────────────────────────
@@ -147,8 +150,79 @@ async function playNext(guildId) {
 }
 
 // ─────────────────────────────────────────────
-//  AI: Groq
+//  SPOTIFY: risoluzione link (bypassa LavaSrc sui nodi pubblici,
+//  che non hanno le nostre credenziali Spotify configurate)
 // ─────────────────────────────────────────────
+let spotifyToken   = null;
+let spotifyExpires = 0;
+
+async function getSpotifyToken() {
+    if (spotifyToken && Date.now() < spotifyExpires) return spotifyToken;
+    if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
+        throw new Error("Credenziali Spotify non configurate sul bot (SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET).");
+    }
+    const creds = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString("base64");
+    const res = await fetch("https://accounts.spotify.com/api/token", {
+        method: "POST",
+        headers: {
+            "Content-Type":  "application/x-www-form-urlencoded",
+            "Authorization": `Basic ${creds}`,
+        },
+        body: "grant_type=client_credentials",
+    });
+    if (!res.ok) throw new Error(`Spotify auth HTTP ${res.status}`);
+    const data = await res.json();
+    spotifyToken   = data.access_token;
+    spotifyExpires = Date.now() + (data.expires_in - 60) * 1000;
+    return spotifyToken;
+}
+
+function parseSpotifyUrl(url) {
+    const m = url.match(/open\.spotify\.com\/(?:intl-\w+\/)?(track|album|playlist)\/([a-zA-Z0-9]+)/);
+    if (!m) return null;
+    return { type: m[1], id: m[2] };
+}
+
+// Restituisce un array di { query, title } dove query è "Artista Titolo",
+// pronta per essere cercata su YouTube/SoundCloud.
+async function resolveSpotifyTracks(url) {
+    const parsed = parseSpotifyUrl(url);
+    if (!parsed) return null;
+
+    const token   = await getSpotifyToken();
+    const headers = { Authorization: `Bearer ${token}` };
+    const results = [];
+
+    if (parsed.type === "track") {
+        const res = await fetch(`https://api.spotify.com/v1/tracks/${parsed.id}`, { headers });
+        if (!res.ok) throw new Error(`Spotify track HTTP ${res.status}`);
+        const t = await res.json();
+        const artists = t.artists.map(a => a.name).join(", ");
+        results.push({ query: `${artists} ${t.name}`, title: `${artists} - ${t.name}` });
+    } else if (parsed.type === "album") {
+        const res = await fetch(`https://api.spotify.com/v1/albums/${parsed.id}/tracks?limit=50`, { headers });
+        if (!res.ok) throw new Error(`Spotify album HTTP ${res.status}`);
+        const data = await res.json();
+        for (const t of data.items ?? []) {
+            const artists = t.artists.map(a => a.name).join(", ");
+            results.push({ query: `${artists} ${t.name}`, title: `${artists} - ${t.name}` });
+        }
+    } else if (parsed.type === "playlist") {
+        const res = await fetch(`https://api.spotify.com/v1/playlists/${parsed.id}/tracks?limit=100`, { headers });
+        if (!res.ok) throw new Error(`Spotify playlist HTTP ${res.status}`);
+        const data = await res.json();
+        for (const item of data.items ?? []) {
+            const t = item.track;
+            if (!t) continue;
+            const artists = t.artists.map(a => a.name).join(", ");
+            results.push({ query: `${artists} ${t.name}`, title: `${artists} - ${t.name}` });
+        }
+    }
+
+    return results;
+}
+
+
 const GROQ_KEY = process.env.GROQ_KEY;
 
 const SYSTEM_PROMPT =
@@ -449,40 +523,89 @@ client.on("interactionCreate", async (interaction) => {
             if (!node) { await interaction.editReply("❌ Nessun nodo audio disponibile."); return; }
             console.log(`[MUSIC] /play userà il nodo: ${node.name}`);
 
-            // Logica ricerca: URL diretto → as-is | SoundCloud scelto → scsearch | default → ytsearch con fallback sc
+            // Logica ricerca: link Spotify → risolto via API Spotify + ricerca YT/SC
+            //                 URL diretto → as-is | SoundCloud scelto → scsearch | default → ytsearch con fallback sc
+            const isSpotify = /open\.spotify\.com/.test(query);
+            let spotifyTracks = null;
+            if (isSpotify) {
+                try {
+                    spotifyTracks = await resolveSpotifyTracks(query);
+                } catch (err) {
+                    console.error("[SPOTIFY] Errore risoluzione:", err.message);
+                    await interaction.editReply(`❌ Errore nel leggere il link Spotify: ${err.message}`);
+                    return;
+                }
+                if (!spotifyTracks || !spotifyTracks.length) {
+                    await interaction.editReply("⚠️ Nessuna traccia trovata in quel link Spotify.");
+                    return;
+                }
+                if (spotifyTracks.length > 25) {
+                    spotifyTracks = spotifyTracks.slice(0, 25);
+                    console.log("[SPOTIFY] Playlist/album troncata a 25 tracce per evitare troppe richieste ravvicinate.");
+                }
+            }
+
             let searches;
-            if (/^https?:\/\//.test(query)) {
-                searches = [query];
-            } else if (sorgente === "soundcloud") {
-                searches = [`scsearch:${query}`];
-            } else {
-                searches = [`ytsearch:${query}`, `scsearch:${query}`];
+            if (!isSpotify) {
+                if (/^https?:\/\//.test(query)) {
+                    searches = [query];
+                } else if (sorgente === "soundcloud") {
+                    searches = [`scsearch:${query}`];
+                } else {
+                    searches = [`ytsearch:${query}`, `scsearch:${query}`];
+                }
             }
 
             let result     = null;
             let usedSource = "YouTube";
-            for (const search of searches) {
-                result = await node.rest.resolve(search).catch((err) => {
-                    console.error(`[MUSIC] Errore resolve "${search}":`, err.message);
-                    return null;
-                });
-                if (result?.data && result.loadType !== "error" && result.loadType !== "empty") {
-                    usedSource = search.startsWith("scsearch") ? "SoundCloud" : "YouTube";
-                    break;
+            let tracks     = [];
+
+            if (isSpotify) {
+                // Per ogni traccia Spotify, cerchiamo il miglior match su YouTube (fallback SoundCloud)
+                usedSource = "Spotify";
+                for (const st of spotifyTracks) {
+                    const stSearches = [`ytsearch:${st.query}`, `scsearch:${st.query}`];
+                    let found = null;
+                    for (const search of stSearches) {
+                        const r = await node.rest.resolve(search).catch((err) => {
+                            console.error(`[MUSIC] Errore resolve "${search}":`, err.message);
+                            return null;
+                        });
+                        if (r?.data && r.loadType !== "error" && r.loadType !== "empty") {
+                            found = r;
+                            break;
+                        }
+                    }
+                    if (found?.loadType === "search" && found.data.length) {
+                        tracks.push(found.data[0]);
+                    } else if (found?.loadType === "track") {
+                        tracks.push(found.data);
+                    }
                 }
-                if (result?.loadType === "error") {
-                    console.error(`[MUSIC] loadType error per "${search}":`, JSON.stringify(result.data));
+                if (!tracks.length) { await interaction.editReply("⚠️ Nessuna traccia Spotify trovata su YouTube/SoundCloud."); return; }
+            } else {
+                for (const search of searches) {
+                    result = await node.rest.resolve(search).catch((err) => {
+                        console.error(`[MUSIC] Errore resolve "${search}":`, err.message);
+                        return null;
+                    });
+                    if (result?.data && result.loadType !== "error" && result.loadType !== "empty") {
+                        usedSource = search.startsWith("scsearch") ? "SoundCloud" : "YouTube";
+                        break;
+                    }
+                    if (result?.loadType === "error") {
+                        console.error(`[MUSIC] loadType error per "${search}":`, JSON.stringify(result.data));
+                    }
+                    result = null;
                 }
-                result = null;
+
+                if (!result?.data) { await interaction.editReply(`⚠️ Nessun risultato per: **${query}**`); return; }
+
+                if (result.loadType === "track")    tracks = [result.data];
+                if (result.loadType === "search")   tracks = result.data.slice(0, 1);
+                if (result.loadType === "playlist") tracks = result.data.tracks ?? [];
+                if (!tracks.length) { await interaction.editReply(`⚠️ Nessun risultato per: **${query}**`); return; }
             }
-
-            if (!result?.data) { await interaction.editReply(`⚠️ Nessun risultato per: **${query}**`); return; }
-
-            let tracks = [];
-            if (result.loadType === "track")    tracks = [result.data];
-            if (result.loadType === "search")   tracks = result.data.slice(0, 1);
-            if (result.loadType === "playlist") tracks = result.data.tracks ?? [];
-            if (!tracks.length) { await interaction.editReply(`⚠️ Nessun risultato per: **${query}**`); return; }
 
             for (const t of tracks) {
                 state.queue.push({
