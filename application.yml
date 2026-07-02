@@ -63,8 +63,8 @@ plugins:
     allowDirectPlaylistIds: true
     clients:
       - WEB
-      - WEBEMBEDDED        # aggiunto come fallback: se WEB viene bloccato su un video,
-      - TVHTML5EMBEDDED     # questi due spesso riescono comunque a caricarlo
+      - WEB_EMBEDDED_PLAYER   # nome corretto per questa versione del plugin (v1.18.1);
+                                # fallback utile se WEB viene bloccato su un video
     oauth:
       enabled: true
       skipInitialization: false   # deve restare false finché non confermi che il nuovo token funziona
