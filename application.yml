@@ -10,7 +10,7 @@ lavalink:
   server:
     password: "${LAVALINK_SERVER_PASSWORD:youshallnotpass}"
     sources:
-      youtube: false          # ⬅️ FIX: deve essere FALSE — disabilita il vecchio source built-in deprecato (senza OAuth) e lascia gestire YouTube solo al plugin dev.lavalink.youtube
+      youtube: false          # deve restare FALSE — YouTube è gestito solo dal plugin dev.lavalink.youtube
       bandcamp: true
       soundcloud: true
       twitch: true
@@ -39,9 +39,22 @@ lavalink:
     youtubeSearchEnabled: true
     soundcloudSearchEnabled: true
     gc-warnings: true
-# Il plugin youtube usa i nomi interni WEB_REMIX, WEB, ANDROID_VR ecc.
-# OAuth funziona automaticamente su tutti i client compatibili
-# quando refreshToken è impostato — non serve specificare client OAuth separati.
+# ─────────────────────────────────────────────
+# RIGENERAZIONE TOKEN OAUTH YOUTUBE (token scaduto dopo ~3 mesi)
+# ─────────────────────────────────────────────
+# PASSO 1: su Render, svuota (NON cancellare) la variabile d'ambiente
+#          LAVALINK_YOUTUBE_REFRESH_TOKEN e riavvia questo servizio Lavalink.
+# PASSO 2: nei log di avvio comparirà un link tipo:
+#          "To give lavalink access to your account, go to
+#           https://www.google.com/device and enter code XXX-XXX-XXX"
+#          Aprilo da browser, fai login (meglio un account Google secondario)
+#          e autorizza.
+# PASSO 3: nei log comparirà il nuovo refresh token, es:
+#          "Login Successful. Refresh token: 1//0g..................."
+#          Copialo e reimpostalo come LAVALINK_YOUTUBE_REFRESH_TOKEN su Render.
+# PASSO 4: riavvia di nuovo il servizio Lavalink con il nuovo token impostato.
+#          skipInitialization resta false così, se scadesse di nuovo in futuro,
+#          te ne accorgerai subito dai log di avvio invece che da /play rotto.
 plugins:
   youtube:
     enabled: true
@@ -49,10 +62,12 @@ plugins:
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
     clients:
-      - WEB                # supporta OAuth e ricerca testuale
+      - WEB
+      - WEBEMBEDDED        # aggiunto come fallback: se WEB viene bloccato su un video,
+      - TVHTML5EMBEDDED     # questi due spesso riescono comunque a caricarlo
     oauth:
       enabled: true
-      skipInitialization: false   # ⬅️ FIX: deve essere false la prima volta, per generare il link OAuth nei log
+      skipInitialization: false   # deve restare false finché non confermi che il nuovo token funziona
       refreshToken: "${LAVALINK_YOUTUBE_REFRESH_TOKEN:}"
   lavasrc:
     providers:                  # ordine di ricerca quando convertiamo da Spotify a stream reale
