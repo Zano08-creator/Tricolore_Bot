@@ -62,13 +62,23 @@ plugins:
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
     clients:
+      # Più client = più fallback se uno viene bloccato dall'IP del server.
+      # L'ordine conta: vengono provati in sequenza finché uno non funziona.
+      - MWEB
       - WEB
-      - WEB_EMBEDDED_PLAYER   # nome corretto per questa versione del plugin (v1.18.1);
-                                # fallback utile se WEB viene bloccato su un video
+      - WEB_EMBEDDED_PLAYER
+      - ANDROID_VR
+      - TV
     oauth:
       enabled: true
       skipInitialization: false   # deve restare false finché non confermi che il nuovo token funziona
       refreshToken: "${LAVALINK_YOUTUBE_REFRESH_TOKEN:}"
+    pot:
+      # PoToken + visitorData: da generare seguendo la guida che ti ho spiegato in chat.
+      # Non obbligatori con OAuth attivo, ma aiutano quando l'IP del server (es. Render)
+      # è già segnalato da YouTube come sospetto. Lascia vuoto se non li hai ancora.
+      token: "${LAVALINK_YOUTUBE_POTOKEN:}"
+      visitorData: "${LAVALINK_YOUTUBE_VISITOR_DATA:}"
   lavasrc:
     providers:                  # ordine di ricerca quando convertiamo da Spotify a stream reale
       - "ytsearch:\"%ISRC%\""   # prova prima per codice ISRC (più precisa)
