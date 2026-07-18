@@ -64,9 +64,14 @@ plugins:
     clients:
       # Più client = più fallback se uno viene bloccato dall'IP del server.
       # L'ordine conta: vengono provati in sequenza finché uno non funziona.
+      # FIX: "WEB_EMBEDDED_PLAYER" non è un identificativo di client valido
+      # (con questa versione del plugin veniva scartato con un warning nei log
+      # "Failed to resolve ... into a Client" e ignorato in silenzio, riducendo
+      # da 5 a 4 i client di fallback realmente usati). Il nome corretto è
+      # "WEBEMBEDDED", come da elenco ufficiale dei client supportati.
       - MWEB
       - WEB
-      - WEB_EMBEDDED_PLAYER
+      - WEBEMBEDDED
       - ANDROID_VR
       - TV
     oauth:
