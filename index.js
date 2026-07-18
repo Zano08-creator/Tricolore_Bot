@@ -8,10 +8,12 @@ const {
     Routes,
     SlashCommandBuilder,
 } = require("discord.js");
-const { Shoukaku, Connectors } = require("shoukaku");
+const { Shoukaku, Connectors, Constants } = require("shoukaku");
 const Parser  = require("rss-parser");
 const express = require("express");
-const fetch   = require("node-fetch");
+// Node 18+ ha fetch nativo (Shoukaku v4 richiede già node >=18).
+// Rimosso "node-fetch": la v3 è ESM-only e rompe require(), e non
+// supporta più l'opzione "timeout" che veniva passata sotto.
 
 // ─────────────────────────────────────────────
 //  CONFIGURAZIONE
@@ -159,6 +161,11 @@ const SYSTEM_PROMPT =
 
 async function askAI(domanda) {
     if (!GROQ_KEY) { console.error("[AI] GROQ_KEY non impostata!"); return null; }
+
+    // fetch nativo non ha più l'opzione "timeout": la implementiamo con AbortController.
+    const controller = new AbortController();
+    const timeoutId  = setTimeout(() => controller.abort(), 15_000);
+
     try {
         const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
@@ -175,7 +182,7 @@ async function askAI(domanda) {
                 max_tokens:  200,
                 temperature: 0.7,
             }),
-            timeout: 15_000,
+            signal: controller.signal,
         });
         if (!res.ok) throw new Error(`Groq HTTP ${res.status}`);
         const data     = await res.json();
@@ -183,19 +190,37 @@ async function askAI(domanda) {
         if (!risposta) throw new Error("Risposta vuota");
         return risposta;
     } catch (err) {
-        console.error("[AI] Groq fallito:", err.message);
+        const msg = err.name === "AbortError" ? "Timeout richiesta Groq" : err.message;
+        console.error("[AI] Groq fallito:", msg);
         return null;
+    } finally {
+        clearTimeout(timeoutId);
     }
 }
 
 // ─────────────────────────────────────────────
 //  HELPERS
 // ─────────────────────────────────────────────
+// FIX: Constants.State.CONNECTED vale 2, non 1 (1 = NEARLY, uno stato
+// transitorio). Con il vecchio controllo "=== 1" un nodo realmente
+// connesso non veniva MAI riconosciuto come disponibile, causando
+// errori intermittenti "Nessun nodo Lavalink disponibile" su /join e /play.
 function getAvailableNode() {
     for (const node of shoukaku.nodes.values()) {
-        if (node.state === 1) return node;
+        if (node.state === Constants.State.CONNECTED) return node;
     }
     return null;
+}
+
+function describeNodeState(state) {
+    switch (state) {
+        case Constants.State.CONNECTED:    return "connected";
+        case Constants.State.CONNECTING:   return "connecting";
+        case Constants.State.NEARLY:       return "nearly";
+        case Constants.State.RECONNECTING: return "reconnecting";
+        case Constants.State.DISCONNECTING:return "disconnecting";
+        default:                           return "disconnected";
+    }
 }
 
 async function getMemberVoiceChannel(interaction) {
@@ -440,7 +465,7 @@ client.on("interactionCreate", async (interaction) => {
             state.textChannel = interaction.channel;
             await ensurePlayer(guild, vc);
 
-            // FIX: usa il nodo a cui il player è EFFETTIVAMENTE collegato,
+            // Usa il nodo a cui il player è EFFETTIVAMENTE collegato,
             // non uno scelto a caso da getAvailableNode(). Prima, se il player
             // veniva connesso da Shoukaku a un nodo (es. self-hosted con OAuth),
             // ma la ricerca/resolve avveniva su un nodo diverso (es. un nodo
@@ -675,7 +700,7 @@ app.get("/",       (_req, res) => res.send("Tricolore Bot – Online ✅"));
 app.get("/health", (_req, res) => {
     const nodeInfo = [...shoukaku.nodes.entries()].map(([name, node]) => ({
         name,
-        state: node.state === 1 ? "connected" : node.state === 0 ? "connecting" : "disconnected",
+        state: describeNodeState(node.state),
         stats: node.stats ?? null,
     }));
     res.json({
@@ -691,8 +716,11 @@ app.listen(PORT, () => console.log(`[EXPRESS] Porta ${PORT} | URL: ${SERVICE_URL
 // ─────────────────────────────────────────────
 //  KEEP-ALIVE (ogni 14 minuti)
 // ─────────────────────────────────────────────
+const http  = require("http");
+const https = require("https");
+
 setInterval(() => {
-    const lib = SERVICE_URL.startsWith("https") ? require("https") : require("http");
+    const lib = SERVICE_URL.startsWith("https") ? https : http;
     lib.get(`${SERVICE_URL}/health`, res => {
         console.log(`[KEEP-ALIVE] OK – status ${res.statusCode}`);
     }).on("error", err => console.warn("[KEEP-ALIVE] Fallito:", err.message));
@@ -704,7 +732,7 @@ setInterval(() => {
 setInterval(async () => {
     for (const nodeConfig of LAVALINK_NODES) {
         const node = shoukaku.nodes.get(nodeConfig.name);
-        if (!node || node.state !== 1) {
+        if (!node || node.state !== Constants.State.CONNECTED) {
             console.warn(`[WATCHDOG] Nodo "${nodeConfig.name}" non connesso, riconnessione...`);
             try {
                 if (node) shoukaku.removeNode(nodeConfig.name);
