@@ -206,6 +206,13 @@ async function askAI(domanda) {
 const FEMBOY_IMAGE_URL = "https://cdn.discordapp.com/attachments/1486810337696284903/1528745944017797191/f12ed5695f082a69f000ac3678f041d7.png?ex=6a5f6b1b&is=6a5e199b&hm=33e3ed246f56d3515ed1d88ab6a1ac36b0fa91d7aa2d7e105a2eb9ff75cb22c6&";
 
 // ─────────────────────────────────────────────
+//  IMMAGINE FISSA PER /tsundere
+// ─────────────────────────────────────────────
+// Metti qui il link della tua immagine: verrà mostrata SEMPRE,
+// identica, ogni volta che qualcuno usa /tsundere.
+const TSUNDERE_IMAGE_URL = "https://cdn.discordapp.com/attachments/1486810337696284903/1528875760046047333/c9c9ff2eed3dff5c3b9f7c0c033704da.gif?ex=6a5fe402&is=6a5e9282&hm=6d2d79878f1470d11de7b7da061534adffdf70eabfd077284667a2675056e983&";
+
+// ─────────────────────────────────────────────
 //  IMMAGINI Safebooru (rating:safe) — /waifu
 // ─────────────────────────────────────────────
 // Nota: usiamo SOLO rating:safe per stare tranquilli sui contenuti.
@@ -437,6 +444,9 @@ const commands = [
         .toJSON(),
     new SlashCommandBuilder()
         .setName("waifu").setDescription("Mostra una bella immagine di una waifu anime")
+        .toJSON(),
+    new SlashCommandBuilder()
+        .setName("tsundere").setDescription("Mostra un'immagine tsundere")
         .toJSON(),
 ];
 
@@ -817,6 +827,19 @@ client.on("interactionCreate", async (interaction) => {
             .setTimestamp();
 
         await interaction.editReply({ embeds: [embed] });
+        return;
+    }
+
+    // ── /tsundere ──────────────────────────────
+    if (commandName === "tsundere") {
+        const embed = new EmbedBuilder()
+            .setColor(0xff4d6d)
+            .setAuthor({ name: "😳 B-baka! Non è mica per te..." })
+            .setImage(TSUNDERE_IMAGE_URL)
+            .setFooter({ text: "Tricolore Bot" })
+            .setTimestamp();
+
+        await interaction.reply({ embeds: [embed] });
         return;
     }
 });
