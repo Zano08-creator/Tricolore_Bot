@@ -210,7 +210,7 @@ const FEMBOY_IMAGE_URL = "https://cdn.discordapp.com/attachments/148681033769628
 // ─────────────────────────────────────────────
 // Metti qui il link della tua immagine: verrà mostrata SEMPRE,
 // identica, ogni volta che qualcuno usa /tsundere.
-const TSUNDERE_IMAGE_URL = "https://cdn.discordapp.com/attachments/1486810337696284903/1528875760046047333/c9c9ff2eed3dff5c3b9f7c0c033704da.gif?ex=6a5fe402&is=6a5e9282&hm=6d2d79878f1470d11de7b7da061534adffdf70eabfd077284667a2675056e983&";
+const TSUNDERE_IMAGE_URL = "https://cdn.discordapp.com/attachments/1486810337696284903/1528878698734944436/8f0fcb4f4d857eb6dc438d66fc14271c.png?ex=6a5fe6be&is=6a5e953e&hm=f58b79b595a058a036797c4962aeff5f51eafee438842468a7acd85e54976305&";
 
 // ─────────────────────────────────────────────
 //  IMMAGINI Safebooru (rating:safe) — /waifu
