@@ -446,7 +446,8 @@ const commands = [
         .setName("waifu").setDescription("Mostra una bella immagine di una waifu anime")
         .toJSON(),
     new SlashCommandBuilder()
-        .setName("tsundere").setDescription("Mostra un'immagine tsundere")
+        .setName("tsundere").setDescription("Trasforma (scherzosamente) un utente in una tsundere")
+        .addUserOption(o => o.setName("utente").setDescription("L'utente da prendere in giro").setRequired(true))
         .toJSON(),
 ];
 
@@ -832,14 +833,22 @@ client.on("interactionCreate", async (interaction) => {
 
     // ── /tsundere ──────────────────────────────
     if (commandName === "tsundere") {
+        const target = interaction.options.getUser("utente", true);
+
+        if (target.bot) {
+            await interaction.reply({ content: "❌ Non puoi scegliere un bot!", ephemeral: true });
+            return;
+        }
+
         const embed = new EmbedBuilder()
             .setColor(0xff4d6d)
             .setAuthor({ name: "😳 B-baka! Non è mica per te..." })
+            .setDescription(`✨ **${target.username}** è ufficialmente diventato/a una tsundere! ✨`)
             .setImage(TSUNDERE_IMAGE_URL)
             .setFooter({ text: "Tricolore Bot" })
             .setTimestamp();
 
-        await interaction.reply({ embeds: [embed] });
+        await interaction.reply({ content: `<@${target.id}>`, embeds: [embed] });
         return;
     }
 });
