@@ -208,12 +208,9 @@ async function askAI(domanda) {
 const SAFEBOORU_EXCLUDE = "-guro -gore -loli -shota -child -lolicon";
 const IMAGE_CACHE_TTL   = 30 * 60 * 1000; // 30 minuti
 
-const FEMBOY_TAG_SETS = [
-    `1girl solo smile rating:safe ${SAFEBOORU_EXCLUDE}`,
-    `1girl solo cute rating:safe ${SAFEBOORU_EXCLUDE}`,
-    `1girl solo school_uniform rating:safe ${SAFEBOORU_EXCLUDE}`,
-    `1girl solo blush rating:safe ${SAFEBOORU_EXCLUDE}`,
-    `1girl solo long_hair rating:safe ${SAFEBOORU_EXCLUDE}`,
+const FEMBOY_STATIC_IMAGES = [
+    "https://cdn.discordapp.com/attachments/1486810337696284903/1528739474698276884/269cfa693631e7b516a661a2a2d983a1.png?ex=6a5f6515&is=6a5e1395&hm=6a1b40fa0f3f3c312997999e72b3ce13f3193bac389101e471a3d69efd59a8a8&",
+    // ...
 ];
 
 // Personaggi femminili molto noti/apprezzati nel fandom anime, usati come
