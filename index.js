@@ -202,17 +202,26 @@ async function askAI(domanda) {
 //  IMMAGINI /femboy (Safebooru, rating:safe)
 // ─────────────────────────────────────────────
 // Nota: usiamo SOLO rating:safe per stare tranquilli sui contenuti.
+// Interroghiamo più tag correlati (invece di uno solo fisso) e uniamo
+// i risultati per avere più varietà nel pool di immagini.
 // Le immagini vengono cachate in memoria e rinnovate periodicamente
 // per non martellare l'API a ogni singolo comando.
-const FEMBOY_TAGS       = "otokonoko rating:safe -guro -gore";
+const FEMBOY_EXCLUDE   = "-guro -gore -loli -shota -child";
+const FEMBOY_TAG_SETS  = [
+    `otokonoko rating:safe ${FEMBOY_EXCLUDE}`,
+    `1boy dress rating:safe ${FEMBOY_EXCLUDE}`,
+    `1boy skirt rating:safe ${FEMBOY_EXCLUDE}`,
+    `crossdressing rating:safe ${FEMBOY_EXCLUDE}`,
+    `boy_in_dress rating:safe ${FEMBOY_EXCLUDE}`,
+];
 const FEMBOY_CACHE_TTL  = 30 * 60 * 1000; // 30 minuti
 let femboyCache         = [];
 let femboyCacheAt       = 0;
 
-async function fetchFemboyImages() {
+async function fetchFemboyImagesForTags(tags) {
     const url =
         "https://safebooru.org/index.php?page=dapi&s=post&q=index&json=1" +
-        `&limit=100&tags=${encodeURIComponent(FEMBOY_TAGS)}`;
+        `&limit=100&tags=${encodeURIComponent(tags)}`;
 
     const controller = new AbortController();
     const timeoutId  = setTimeout(() => controller.abort(), 10_000);
@@ -229,11 +238,20 @@ async function fetchFemboyImages() {
                 id:     p.id,
             }));
     } catch (err) {
-        console.error("[FEMBOY] Errore fetch Safebooru:", err.message);
+        console.error(`[FEMBOY] Errore fetch Safebooru (tags="${tags}"):`, err.message);
         return [];
     } finally {
         clearTimeout(timeoutId);
     }
+}
+
+async function fetchFemboyImages() {
+    const results = await Promise.all(FEMBOY_TAG_SETS.map(fetchFemboyImagesForTags));
+    const merged  = new Map(); // dedup per id
+    for (const list of results) {
+        for (const img of list) merged.set(img.id, img);
+    }
+    return [...merged.values()];
 }
 
 async function getRandomFemboyImage() {
