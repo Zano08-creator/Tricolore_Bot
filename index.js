@@ -199,26 +199,38 @@ async function askAI(domanda) {
 }
 
 // ─────────────────────────────────────────────
-//  IMMAGINI /femboy (Safebooru, rating:safe)
+//  IMMAGINI Safebooru (rating:safe) — /femboy, /waifu
 // ─────────────────────────────────────────────
 // Nota: usiamo SOLO rating:safe per stare tranquilli sui contenuti.
-// Interroghiamo più tag correlati (invece di uno solo fisso) e uniamo
-// i risultati per avere più varietà nel pool di immagini.
-// Le immagini vengono cachate in memoria e rinnovate periodicamente
-// per non martellare l'API a ogni singolo comando.
-const FEMBOY_EXCLUDE   = "-guro -gore -loli -shota -child";
-const FEMBOY_TAG_SETS  = [
-    `otokonoko rating:safe ${FEMBOY_EXCLUDE}`,
-    `1boy dress rating:safe ${FEMBOY_EXCLUDE}`,
-    `1boy skirt rating:safe ${FEMBOY_EXCLUDE}`,
-    `crossdressing rating:safe ${FEMBOY_EXCLUDE}`,
-    `boy_in_dress rating:safe ${FEMBOY_EXCLUDE}`,
-];
-const FEMBOY_CACHE_TTL  = 30 * 60 * 1000; // 30 minuti
-let femboyCache         = [];
-let femboyCacheAt       = 0;
+// Interroghiamo più tag correlati per ogni comando e uniamo i risultati
+// per avere varietà. Ogni set di tag ha la propria cache in memoria,
+// rinnovata periodicamente per non martellare l'API ad ogni comando.
+const SAFEBOORU_EXCLUDE = "-guro -gore -loli -shota -child -lolicon";
+const IMAGE_CACHE_TTL   = 30 * 60 * 1000; // 30 minuti
 
-async function fetchFemboyImagesForTags(tags) {
+const FEMBOY_TAG_SETS = [
+    `1girl solo smile rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `1girl solo cute rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `1girl solo school_uniform rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `1girl solo blush rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `1girl solo long_hair rating:safe ${SAFEBOORU_EXCLUDE}`,
+];
+
+// Personaggi femminili molto noti/apprezzati nel fandom anime, usati come
+// tag per pescare fanart di qualità. Combinati con rating:safe.
+const WAIFU_TAG_SETS = [
+    `rem_(re:zero) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `asuna_(sao) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `mikasa_ackerman rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `zero_two_(darling_in_the_franxx) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `nezuko_kamado rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `hinata_hyuga rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `chika_fujiwara rating:safe ${SAFEBOORU_EXCLUDE}`,
+];
+
+const imageCaches = new Map(); // cacheKey -> { list, at }
+
+async function fetchImagesForTags(tags) {
     const url =
         "https://safebooru.org/index.php?page=dapi&s=post&q=index&json=1" +
         `&limit=100&tags=${encodeURIComponent(tags)}`;
@@ -238,33 +250,36 @@ async function fetchFemboyImagesForTags(tags) {
                 id:     p.id,
             }));
     } catch (err) {
-        console.error(`[FEMBOY] Errore fetch Safebooru (tags="${tags}"):`, err.message);
+        console.error(`[IMAGES] Errore fetch Safebooru (tags="${tags}"):`, err.message);
         return [];
     } finally {
         clearTimeout(timeoutId);
     }
 }
 
-async function fetchFemboyImages() {
-    const results = await Promise.all(FEMBOY_TAG_SETS.map(fetchFemboyImagesForTags));
-    const merged  = new Map(); // dedup per id
+async function fetchImagesForTagSets(tagSets) {
+    const results = await Promise.all(tagSets.map(fetchImagesForTags));
+    const merged   = new Map(); // dedup per id
     for (const list of results) {
         for (const img of list) merged.set(img.id, img);
     }
     return [...merged.values()];
 }
 
-async function getRandomFemboyImage() {
-    const now = Date.now();
-    if (!femboyCache.length || (now - femboyCacheAt) > FEMBOY_CACHE_TTL) {
-        const fresh = await fetchFemboyImages();
+async function getRandomImage(cacheKey, tagSets) {
+    const now   = Date.now();
+    const cache = imageCaches.get(cacheKey) ?? { list: [], at: 0 };
+
+    if (!cache.list.length || (now - cache.at) > IMAGE_CACHE_TTL) {
+        const fresh = await fetchImagesForTagSets(tagSets);
         if (fresh.length) {
-            femboyCache   = fresh;
-            femboyCacheAt = now;
+            cache.list = fresh;
+            cache.at   = now;
+            imageCaches.set(cacheKey, cache);
         }
     }
-    if (!femboyCache.length) return null;
-    return femboyCache[Math.floor(Math.random() * femboyCache.length)];
+    if (!cache.list.length) return null;
+    return cache.list[Math.floor(Math.random() * cache.list.length)];
 }
 
 // ─────────────────────────────────────────────
@@ -420,6 +435,9 @@ const commands = [
     new SlashCommandBuilder()
         .setName("femboy").setDescription("Trasforma (scherzosamente) un utente in un femboy")
         .addUserOption(o => o.setName("utente").setDescription("L'utente da prendere in giro").setRequired(true))
+        .toJSON(),
+    new SlashCommandBuilder()
+        .setName("waifu").setDescription("Mostra una bella immagine di una waifu anime")
         .toJSON(),
 ];
 
@@ -773,7 +791,7 @@ client.on("interactionCreate", async (interaction) => {
 
         await interaction.deferReply();
 
-        const img = await getRandomFemboyImage();
+        const img = await getRandomImage("femboy", FEMBOY_TAG_SETS);
         if (!img) {
             await interaction.editReply("⚠️ Non sono riuscito a recuperare un'immagine, riprova tra poco.");
             return;
@@ -787,6 +805,27 @@ client.on("interactionCreate", async (interaction) => {
             .setTimestamp();
 
         await interaction.editReply({ content: `<@${target.id}>`, embeds: [embed] });
+        return;
+    }
+
+    // ── /waifu ─────────────────────────────────
+    if (commandName === "waifu") {
+        await interaction.deferReply();
+
+        const img = await getRandomImage("waifu", WAIFU_TAG_SETS);
+        if (!img) {
+            await interaction.editReply("⚠️ Non sono riuscito a recuperare un'immagine, riprova tra poco.");
+            return;
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor(0xffb6c1)
+            .setAuthor({ name: "💖 Waifu del momento" })
+            .setImage(img.url)
+            .setFooter({ text: "Tricolore Bot · immagine via Safebooru (rating: safe)" })
+            .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
         return;
     }
 });
