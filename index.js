@@ -199,7 +199,14 @@ async function askAI(domanda) {
 }
 
 // ─────────────────────────────────────────────
-//  IMMAGINI Safebooru (rating:safe) — /femboy, /waifu
+//  IMMAGINE FISSA PER /femboy
+// ─────────────────────────────────────────────
+// Metti qui il link della tua immagine: verrà mostrata SEMPRE,
+// identica, ogni volta che qualcuno usa /femboy.
+const FEMBOY_IMAGE_URL = "https://cdn.discordapp.com/attachments/1486810337696284903/1528745944017797191/f12ed5695f082a69f000ac3678f041d7.png?ex=6a5f6b1b&is=6a5e199b&hm=33e3ed246f56d3515ed1d88ab6a1ac36b0fa91d7aa2d7e105a2eb9ff75cb22c6&";
+
+// ─────────────────────────────────────────────
+//  IMMAGINI Safebooru (rating:safe) — /waifu
 // ─────────────────────────────────────────────
 // Nota: usiamo SOLO rating:safe per stare tranquilli sui contenuti.
 // Interroghiamo più tag correlati per ogni comando e uniamo i risultati
@@ -207,11 +214,6 @@ async function askAI(domanda) {
 // rinnovata periodicamente per non martellare l'API ad ogni comando.
 const SAFEBOORU_EXCLUDE = "-guro -gore -loli -shota -child -lolicon";
 const IMAGE_CACHE_TTL   = 30 * 60 * 1000; // 30 minuti
-
-const FEMBOY_STATIC_IMAGES = [
-    "https://cdn.discordapp.com/attachments/1486810337696284903/1528739474698276884/269cfa693631e7b516a661a2a2d983a1.png?ex=6a5f6515&is=6a5e1395&hm=6a1b40fa0f3f3c312997999e72b3ce13f3193bac389101e471a3d69efd59a8a8&",
-    // ...
-];
 
 // Personaggi femminili molto noti/apprezzati nel fandom anime, usati come
 // tag per pescare fanart di qualità. Combinati con rating:safe.
@@ -786,22 +788,14 @@ client.on("interactionCreate", async (interaction) => {
             return;
         }
 
-        await interaction.deferReply();
-
-        const img = await getRandomImage("femboy", FEMBOY_TAG_SETS);
-        if (!img) {
-            await interaction.editReply("⚠️ Non sono riuscito a recuperare un'immagine, riprova tra poco.");
-            return;
-        }
-
         const embed = new EmbedBuilder()
             .setColor(0xff69b4)
             .setDescription(`✨ **${target.username}** è ufficialmente diventato/a un femboy! ✨`)
-            .setImage(img.url)
-            .setFooter({ text: "Tricolore Bot · immagine via Safebooru (rating: safe)" })
+            .setImage(FEMBOY_IMAGE_URL)
+            .setFooter({ text: "Tricolore Bot" })
             .setTimestamp();
 
-        await interaction.editReply({ content: `<@${target.id}>`, embeds: [embed] });
+        await interaction.reply({ content: `<@${target.id}>`, embeds: [embed] });
         return;
     }
 
