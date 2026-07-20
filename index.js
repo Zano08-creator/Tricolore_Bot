@@ -199,6 +199,57 @@ async function askAI(domanda) {
 }
 
 // ─────────────────────────────────────────────
+//  IMMAGINI /femboy (Safebooru, rating:safe)
+// ─────────────────────────────────────────────
+// Nota: usiamo SOLO rating:safe per stare tranquilli sui contenuti.
+// Le immagini vengono cachate in memoria e rinnovate periodicamente
+// per non martellare l'API a ogni singolo comando.
+const FEMBOY_TAGS       = "otokonoko rating:safe -guro -gore";
+const FEMBOY_CACHE_TTL  = 30 * 60 * 1000; // 30 minuti
+let femboyCache         = [];
+let femboyCacheAt       = 0;
+
+async function fetchFemboyImages() {
+    const url =
+        "https://safebooru.org/index.php?page=dapi&s=post&q=index&json=1" +
+        `&limit=100&tags=${encodeURIComponent(FEMBOY_TAGS)}`;
+
+    const controller = new AbortController();
+    const timeoutId  = setTimeout(() => controller.abort(), 10_000);
+    try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) throw new Error(`Safebooru HTTP ${res.status}`);
+        const data = await res.json();
+        if (!Array.isArray(data)) return [];
+        return data
+            .filter(p => p?.rating === "safe" && p?.image && p?.directory)
+            .map(p => ({
+                url:    `https://safebooru.org/images/${p.directory}/${p.image}`,
+                source: p.source || null,
+                id:     p.id,
+            }));
+    } catch (err) {
+        console.error("[FEMBOY] Errore fetch Safebooru:", err.message);
+        return [];
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+async function getRandomFemboyImage() {
+    const now = Date.now();
+    if (!femboyCache.length || (now - femboyCacheAt) > FEMBOY_CACHE_TTL) {
+        const fresh = await fetchFemboyImages();
+        if (fresh.length) {
+            femboyCache   = fresh;
+            femboyCacheAt = now;
+        }
+    }
+    if (!femboyCache.length) return null;
+    return femboyCache[Math.floor(Math.random() * femboyCache.length)];
+}
+
+// ─────────────────────────────────────────────
 //  HELPERS
 // ─────────────────────────────────────────────
 // FIX: Constants.State.CONNECTED vale 2, non 1 (1 = NEARLY, uno stato
@@ -347,6 +398,10 @@ const commands = [
     new SlashCommandBuilder()
         .setName("chiedi").setDescription("Fai una domanda all'AI")
         .addStringOption(o => o.setName("domanda").setDescription("La tua domanda").setRequired(true))
+        .toJSON(),
+    new SlashCommandBuilder()
+        .setName("femboy").setDescription("Trasforma (scherzosamente) un utente in un femboy")
+        .addUserOption(o => o.setName("utente").setDescription("L'utente da prendere in giro").setRequired(true))
         .toJSON(),
 ];
 
@@ -686,6 +741,34 @@ client.on("interactionCreate", async (interaction) => {
             .setFooter({ text: "Tricolore AI · Powered by Groq" })
             .setTimestamp();
         await interaction.editReply({ embeds: [embed] });
+        return;
+    }
+
+    // ── /femboy ────────────────────────────────
+    if (commandName === "femboy") {
+        const target = interaction.options.getUser("utente", true);
+
+        if (target.bot) {
+            await interaction.reply({ content: "❌ Non puoi scegliere un bot!", ephemeral: true });
+            return;
+        }
+
+        await interaction.deferReply();
+
+        const img = await getRandomFemboyImage();
+        if (!img) {
+            await interaction.editReply("⚠️ Non sono riuscito a recuperare un'immagine, riprova tra poco.");
+            return;
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor(0xff69b4)
+            .setDescription(`✨ **${target.username}** è ufficialmente diventato/a un femboy! ✨`)
+            .setImage(img.url)
+            .setFooter({ text: "Tricolore Bot · immagine via Safebooru (rating: safe)" })
+            .setTimestamp();
+
+        await interaction.editReply({ content: `<@${target.id}>`, embeds: [embed] });
         return;
     }
 });
