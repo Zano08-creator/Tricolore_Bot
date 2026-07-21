@@ -203,15 +203,19 @@ async function askAI(domanda) {
 // ─────────────────────────────────────────────
 // Metti qui il link della tua immagine: verrà mostrata SEMPRE,
 // identica, ogni volta che qualcuno usa /femboy.
-const FEMBOY_IMAGE_URL = "https://cdn.discordapp.com/attachments/1486810337696284903/1528745944017797191/f12ed5695f082a69f000ac3678f041d7.png?ex=6a5f6b1b&is=6a5e199b&hm=33e3ed246f56d3515ed1d88ab6a1ac36b0fa91d7aa2d7e105a2eb9ff75cb22c6&";
+const FEMBOY_GIFS = [
+    "https://media1.tenor.com/m/cv-zCxuC05AAAAAC/maid-cafe-masculine.gif",
+    "https://media1.tenor.com/m/UuRXcO214jwAAAAC/purringle-purringles.gif",
+    "https://media1.tenor.com/m/gDl6r7WZF2gAAAAC/anime.gif",
+];
 
 // ─────────────────────────────────────────────
 //  GIF PER /tsundere (scelta a caso tra più link)
 // ─────────────────────────────────────────────
 const TSUNDERE_GIFS = [
-    "https://tenor.com/it/view/anime-tsundere-pout-petty-upset-gif-8657468",
-    "https://tenor.com/it/view/hmph-hmph-anime-tsundere-gif-25758864",
-    "https://tenor.com/it/view/tsundere-shy-tsundere-shy-tsundere-cute-shy-cute-gif-20341983",
+    "https://media1.tenor.com/m/p4vHR4zM_u0AAAAd/anime-tsundere.gif",
+    "https://media1.tenor.com/m/3kvIVPYgTE8AAAAC/hmph-hmph-anime.gif",
+    "https://media1.tenor.com/m/3-Y5w-CLPSgAAAAC/tsundere-shy.gif",
 ];
 
 function getRandomTsundereGif() {
@@ -808,7 +812,7 @@ client.on("interactionCreate", async (interaction) => {
         const embed = new EmbedBuilder()
             .setColor(0xff69b4)
             .setDescription(`✨ **${target.username}** è ufficialmente diventato/a un femboy! ✨`)
-            .setImage(FEMBOY_IMAGE_URL)
+            .setImage(getRandomFemboyGif())
             .setFooter({ text: "Tricolore Bot" })
             .setTimestamp();
 
