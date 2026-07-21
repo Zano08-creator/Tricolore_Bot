@@ -209,9 +209,9 @@ const FEMBOY_IMAGE_URL = "https://cdn.discordapp.com/attachments/148681033769628
 //  GIF PER /tsundere (scelta a caso tra più link)
 // ─────────────────────────────────────────────
 const TSUNDERE_GIFS = [
-    "https://klipy.com/gifs/anime-tsundere-6",
-    "https://klipy.com/gifs/hmph-hmph-anime",
-    "https://klipy.com/gifs/tsundere-shy",
+    "https://tenor.com/it/view/anime-tsundere-pout-petty-upset-gif-8657468",
+    "https://tenor.com/it/view/hmph-hmph-anime-tsundere-gif-25758864",
+    "https://tenor.com/it/view/tsundere-shy-tsundere-shy-tsundere-cute-shy-cute-gif-20341983",
 ];
 
 function getRandomTsundereGif() {
