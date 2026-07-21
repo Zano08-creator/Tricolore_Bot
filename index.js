@@ -203,15 +203,7 @@ async function askAI(domanda) {
 // ─────────────────────────────────────────────
 // Metti qui il link della tua immagine: verrà mostrata SEMPRE,
 // identica, ogni volta che qualcuno usa /femboy.
-const FEMBOY_GIFS = [
-    "https://i.imgur.com/2l6Ye1f.gif",
-    "https://i.imgur.com/YC5w7tl.gif",
-    "https://i.imgur.com/NicNMXt.gif",
-];
-
-function getRandomFemboyGif() {
-    return FEMBOY_GIFS[Math.floor(Math.random() * FEMBOY_GIFS.length)];
-}
+const FEMBOY_GIF = "https://i.imgur.com/DOGOUIz.gif";
 
 // ─────────────────────────────────────────────
 //  GIF PER /tsundere (scelta a caso tra più link)
@@ -819,7 +811,7 @@ client.on("interactionCreate", async (interaction) => {
         const embed = new EmbedBuilder()
             .setColor(0xff69b4)
             .setDescription(`✨ **${target.username}** è ufficialmente diventato/a un femboy! ✨`)
-            .setImage(getRandomFemboyGif())
+            .setImage(FEMBOY_GIF)
             .setFooter({ text: "Tricolore Bot" })
             .setTimestamp();
 
