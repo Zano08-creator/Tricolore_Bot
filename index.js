@@ -204,9 +204,9 @@ async function askAI(domanda) {
 // Metti qui il link della tua immagine: verrà mostrata SEMPRE,
 // identica, ogni volta che qualcuno usa /femboy.
 const FEMBOY_GIFS = [
-    "https://media1.tenor.com/m/cv-zCxuC05AAAAAC/maid-cafe-masculine.gif",
-    "https://media1.tenor.com/m/UuRXcO214jwAAAAC/purringle-purringles.gif",
-    "https://media1.tenor.com/m/gDl6r7WZF2gAAAAC/anime.gif",
+    "https://i.imgur.com/2l6Ye1f.gif",
+    "https://i.imgur.com/YC5w7tl.gif",
+    "https://i.imgur.com/NicNMXt.gif",
 ];
 
 function getRandomFemboyGif() {
@@ -220,9 +220,9 @@ function getRandomFemboyGif() {
 //  GIF PER /tsundere (scelta a caso tra più link)
 // ─────────────────────────────────────────────
 const TSUNDERE_GIFS = [
-    "https://media1.tenor.com/m/p4vHR4zM_u0AAAAC/anime-tsundere.gif",
-    "https://media1.tenor.com/m/3kvIVPYgTE8AAAAC/hmph-hmph-anime.gif",
-    "https://media1.tenor.com/m/3-Y5w-CLPSgAAAAC/tsundere-shy.gif",
+    "https://i.imgur.com/LvqCv7O.gif",
+    "https://i.imgur.com/yovTEyD.gif",
+    "https://i.imgur.com/fOTLqoq.gif",
 ];
 
 function getRandomTsundereGif() {
