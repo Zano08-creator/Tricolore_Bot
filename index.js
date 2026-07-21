@@ -212,14 +212,14 @@ const FEMBOY_GIFS = [
 // ─────────────────────────────────────────────
 //  GIF PER /tsundere (scelta a caso tra più link)
 // ─────────────────────────────────────────────
-const TSUNDERE_GIFS = [
-    "https://media1.tenor.com/m/p4vHR4zM_u0AAAAd/anime-tsundere.gif",
-    "https://media1.tenor.com/m/3kvIVPYgTE8AAAAC/hmph-hmph-anime.gif",
-    "https://media1.tenor.com/m/3-Y5w-CLPSgAAAAC/tsundere-shy.gif",
+const FEMBOY_GIFS = [
+    "https://media1.tenor.com/m/cv-zCxuC05AAAAAC/maid-cafe-masculine.gif",
+    "https://media1.tenor.com/m/UuRXcO214jwAAAAC/purringle-purringles.gif",
+    "https://media1.tenor.com/m/gDl6r7WZF2gAAAAC/anime.gif",
 ];
 
-function getRandomTsundereGif() {
-    return TSUNDERE_GIFS[Math.floor(Math.random() * TSUNDERE_GIFS.length)];
+function getRandomFemboyGif() {
+    return FEMBOY_GIFS[Math.floor(Math.random() * FEMBOY_GIFS.length)];
 }
 
 // ─────────────────────────────────────────────
