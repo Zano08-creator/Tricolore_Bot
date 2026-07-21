@@ -206,11 +206,17 @@ async function askAI(domanda) {
 const FEMBOY_IMAGE_URL = "https://cdn.discordapp.com/attachments/1486810337696284903/1528745944017797191/f12ed5695f082a69f000ac3678f041d7.png?ex=6a5f6b1b&is=6a5e199b&hm=33e3ed246f56d3515ed1d88ab6a1ac36b0fa91d7aa2d7e105a2eb9ff75cb22c6&";
 
 // ─────────────────────────────────────────────
-//  IMMAGINE FISSA PER /tsundere
+//  GIF PER /tsundere (scelta a caso tra più link)
 // ─────────────────────────────────────────────
-// Metti qui il link della tua immagine: verrà mostrata SEMPRE,
-// identica, ogni volta che qualcuno usa /tsundere.
-const TSUNDERE_IMAGE_URL = "https://cdn.discordapp.com/attachments/1486810337696284903/1528878698734944436/8f0fcb4f4d857eb6dc438d66fc14271c.png?ex=6a5fe6be&is=6a5e953e&hm=f58b79b595a058a036797c4962aeff5f51eafee438842468a7acd85e54976305&";
+const TSUNDERE_GIFS = [
+    "https://klipy.com/gifs/anime-tsundere-6",
+    "https://klipy.com/gifs/hmph-hmph-anime",
+    "https://klipy.com/gifs/tsundere-shy",
+];
+
+function getRandomTsundereGif() {
+    return TSUNDERE_GIFS[Math.floor(Math.random() * TSUNDERE_GIFS.length)];
+}
 
 // ─────────────────────────────────────────────
 //  IMMAGINI Safebooru (rating:safe) — /waifu
@@ -844,7 +850,7 @@ client.on("interactionCreate", async (interaction) => {
             .setColor(0xff4d6d)
             .setAuthor({ name: "😳 B-baka! Non è mica per te..." })
             .setDescription(`✨ **${target.username}** è ufficialmente diventato/a una tsundere! ✨`)
-            .setImage(TSUNDERE_IMAGE_URL)
+            .setImage(getRandomTsundereGif())
             .setFooter({ text: "Tricolore Bot" })
             .setTimestamp();
 
