@@ -208,9 +208,6 @@ const FEMBOY_GIF = "https://i.imgur.com/DOGOUIz.gif";
 // ─────────────────────────────────────────────
 //  GIF PER /tsundere (scelta a caso tra più link)
 // ─────────────────────────────────────────────
-// ─────────────────────────────────────────────
-//  GIF PER /tsundere (scelta a caso tra più link)
-// ─────────────────────────────────────────────
 const TSUNDERE_GIFS = [
     "https://i.imgur.com/LvqCv7O.gif",
     "https://i.imgur.com/yovTEyD.gif",
@@ -295,6 +292,69 @@ async function getRandomImage(cacheKey, tagSets) {
     }
     if (!cache.list.length) return null;
     return cache.list[Math.floor(Math.random() * cache.list.length)];
+}
+
+// ─────────────────────────────────────────────
+//  ANIME RANDOM (Jikan API — MyAnimeList wrapper, no API key)
+// ─────────────────────────────────────────────
+async function jikanFetch(url) {
+    const controller = new AbortController();
+    const timeoutId  = setTimeout(() => controller.abort(), 10_000);
+    try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) throw new Error(`Jikan HTTP ${res.status}`);
+        return await res.json();
+    } catch (err) {
+        console.error(`[ANIME] Errore fetch (${url}):`, err.message);
+        return null;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+// Cache dei generi ufficiali MyAnimeList, caricata una volta all'avvio
+// e usata per l'autocomplete di /anime (Discord permette max 25 scelte
+// fisse con addChoices, ma i generi MAL sono oltre 40: con l'autocomplete
+// invece la lista può essere completa e filtrabile mentre si scrive).
+let animeGenresCache = []; // [{ name: "Action", value: "1" }, ...]
+
+async function loadAnimeGenres() {
+    const data = await jikanFetch("https://api.jikan.moe/v4/genres/anime");
+    if (!data?.data?.length) {
+        console.error("[ANIME] Impossibile caricare i generi da Jikan.");
+        return;
+    }
+    animeGenresCache = data.data
+        .map(g => ({ name: g.name, value: String(g.mal_id) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    console.log(`[ANIME] Caricati ${animeGenresCache.length} generi da Jikan.`);
+}
+
+async function getRandomAnime(genreId) {
+    // Nessun genere -> endpoint random nativo di Jikan (già filtrato SFW)
+    if (!genreId) {
+        const data = await jikanFetch("https://api.jikan.moe/v4/random/anime?sfw");
+        return data?.data ?? null;
+    }
+
+    // Con genere: prima chiamata per sapere quante pagine esistono,
+    // poi si sceglie una pagina a caso (limitata a 20 per non esagerare
+    // con le richieste) e si estrae un titolo a caso da quella pagina,
+    // così il risultato resta vario e non sempre il più popolare.
+    const base  = `https://api.jikan.moe/v4/anime?genres=${genreId}&order_by=members&sort=desc&limit=25&sfw=true`;
+    const first = await jikanFetch(`${base}&page=1`);
+    if (!first?.data?.length) return null;
+
+    const lastPage   = Math.min(first.pagination?.last_visible_page ?? 1, 20);
+    const randomPage = Math.floor(Math.random() * lastPage) + 1;
+
+    let list = first.data;
+    if (randomPage !== 1) {
+        const other = await jikanFetch(`${base}&page=${randomPage}`);
+        if (other?.data?.length) list = other.data;
+    }
+
+    return list[Math.floor(Math.random() * list.length)] ?? null;
 }
 
 // ─────────────────────────────────────────────
@@ -458,6 +518,13 @@ const commands = [
         .setName("tsundere").setDescription("Trasforma (scherzosamente) un utente in una tsundere")
         .addUserOption(o => o.setName("utente").setDescription("L'utente da prendere in giro").setRequired(true))
         .toJSON(),
+    new SlashCommandBuilder()
+        .setName("anime").setDescription("Consiglia un anime a caso")
+        .addStringOption(o =>
+            o.setName("genere")
+             .setDescription("Filtra per genere (facoltativo, scrivi per cercare)")
+             .setAutocomplete(true)
+        ).toJSON(),
 ];
 
 // ─────────────────────────────────────────────
@@ -485,6 +552,7 @@ shoukaku.on("disconnect", n     => console.warn(`[LAVALINK] Disconnesso: ${n}`))
 
 client.once("ready", async () => {
     console.log(`[BOT] Online come ${client.user.tag}`);
+    await loadAnimeGenres();
     const rest = new REST({ version: "10" }).setToken(TOKEN);
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
     console.log("[BOT] Comandi registrati.");
@@ -494,6 +562,21 @@ client.once("ready", async () => {
 //  GESTIONE COMANDI
 // ─────────────────────────────────────────────
 client.on("interactionCreate", async (interaction) => {
+
+    // ── Autocomplete /anime genere ─────────────
+    if (interaction.isAutocomplete()) {
+        if (interaction.commandName === "anime") {
+            const focused = interaction.options.getFocused().toLowerCase();
+            const filtered = animeGenresCache
+                .filter(g => g.name.toLowerCase().includes(focused))
+                .slice(0, 25);
+            await interaction.respond(
+                filtered.map(g => ({ name: g.name, value: g.value }))
+            ).catch(() => {});
+        }
+        return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
     const { commandName, guild } = interaction;
 
@@ -858,6 +941,43 @@ client.on("interactionCreate", async (interaction) => {
             .setTimestamp();
 
         await interaction.reply({ content: `<@${target.id}>`, embeds: [embed] });
+        return;
+    }
+
+    // ── /anime ─────────────────────────────────
+    if (commandName === "anime") {
+        await interaction.deferReply();
+
+        const genreId = interaction.options.getString("genere");
+        const anime   = await getRandomAnime(genreId);
+
+        if (!anime) {
+            await interaction.editReply("⚠️ Non sono riuscito a trovare un anime, riprova tra poco.");
+            return;
+        }
+
+        const titolo    = anime.title_english || anime.title || "Titolo sconosciuto";
+        const sinossi   = (anime.synopsis || "Nessuna sinossi disponibile.").slice(0, 600);
+        const genresStr = (anime.genres ?? []).map(g => g.name).join(", ") || "N/D";
+        const cover     = anime.images?.jpg?.large_image_url ?? anime.images?.jpg?.image_url ?? null;
+
+        const embed = new EmbedBuilder()
+            .setColor(0x9b59b6)
+            .setAuthor({ name: "📺 Consiglio anime" })
+            .setTitle(titolo.slice(0, 256))
+            .setURL(anime.url ?? null)
+            .setDescription(sinossi)
+            .setImage(cover)
+            .addFields(
+                { name: "⭐ Voto",    value: anime.score ? `${anime.score}/10` : "N/D", inline: true },
+                { name: "🎬 Episodi", value: anime.episodes ? `${anime.episodes}` : "N/D", inline: true },
+                { name: "📅 Stato",   value: anime.status ?? "N/D", inline: true },
+                { name: "🏷️ Generi", value: genresStr.slice(0, 1024), inline: false },
+            )
+            .setFooter({ text: "Tricolore Bot · dati via Jikan (MyAnimeList)" })
+            .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
         return;
     }
 });
