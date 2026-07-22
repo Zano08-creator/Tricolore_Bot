@@ -376,6 +376,9 @@ async function loadAnimeGenres() {
     console.log(`[ANIME] Caricati ${animeGenresCache.length} generi da Jikan.`);
 }
 
+const ANIME_CACHE_TTL  = 60 * 60 * 1000; // 1 ora
+const animeGenreCache  = new Map(); // genreId -> { list, at }
+
 async function getRandomAnime(genreId) {
     // Nessun genere -> endpoint random nativo di Jikan (già filtrato SFW)
     if (!genreId) {
@@ -383,25 +386,34 @@ async function getRandomAnime(genreId) {
         return data?.data ?? null;
     }
 
-    // Con genere: UNA sola chiamata a una pagina scelta a caso (niente
-    // order_by/sort, che su Jikan è un'operazione pesante lato server e
-    // spesso causa timeout/504). Prendiamo tra le prime 10 pagine, poi
-    // un titolo a caso da quella pagina.
-    const randomPage = Math.floor(Math.random() * 10) + 1;
-    let data = await jikanFetch(
-        `https://api.jikan.moe/v4/anime?genres=${genreId}&limit=25&sfw=true&page=${randomPage}`
-    );
+    // Con genere: usiamo una cache per non dipendere da Jikan ad ogni
+    // singola richiesta. La prima volta che un genere viene richiesto
+    // (o quando la cache scade) scarichiamo 25 anime di quel genere e li
+    // riusiamo per un'ora, pescandone uno a caso ogni volta dal set salvato.
+    const now   = Date.now();
+    const cache = animeGenreCache.get(genreId) ?? { list: [], at: 0 };
 
-    // Se la pagina casuale non ha risultati (genere con poche pagine),
-    // riprova una sola volta con la pagina 1 prima di arrenderti.
-    if (!data?.data?.length && randomPage !== 1) {
-        data = await jikanFetch(
-            `https://api.jikan.moe/v4/anime?genres=${genreId}&limit=25&sfw=true&page=1`
+    if (!cache.list.length || (now - cache.at) > ANIME_CACHE_TTL) {
+        const randomPage = Math.floor(Math.random() * 10) + 1;
+        let data = await jikanFetch(
+            `https://api.jikan.moe/v4/anime?genres=${genreId}&limit=25&sfw=true&page=${randomPage}`
         );
+        if (!data?.data?.length && randomPage !== 1) {
+            data = await jikanFetch(
+                `https://api.jikan.moe/v4/anime?genres=${genreId}&limit=25&sfw=true&page=1`
+            );
+        }
+        if (data?.data?.length) {
+            cache.list = data.data;
+            cache.at   = now;
+            animeGenreCache.set(genreId, cache);
+        }
+        // Se Jikan non risponde ma avevamo già una lista precedente (anche
+        // scaduta), meglio riusare quella vecchia che non restituire nulla.
     }
-    if (!data?.data?.length) return null;
 
-    return data.data[Math.floor(Math.random() * data.data.length)] ?? null;
+    if (!cache.list.length) return null;
+    return cache.list[Math.floor(Math.random() * cache.list.length)] ?? null;
 }
 
 // ─────────────────────────────────────────────
