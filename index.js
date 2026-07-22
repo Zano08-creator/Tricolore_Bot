@@ -383,24 +383,25 @@ async function getRandomAnime(genreId) {
         return data?.data ?? null;
     }
 
-    // Con genere: prima chiamata per sapere quante pagine esistono,
-    // poi si sceglie una pagina a caso (limitata a 20 per non esagerare
-    // con le richieste) e si estrae un titolo a caso da quella pagina,
-    // così il risultato resta vario e non sempre il più popolare.
-    const base  = `https://api.jikan.moe/v4/anime?genres=${genreId}&order_by=members&sort=desc&limit=25&sfw=true`;
-    const first = await jikanFetch(`${base}&page=1`);
-    if (!first?.data?.length) return null;
+    // Con genere: UNA sola chiamata a una pagina scelta a caso (niente
+    // order_by/sort, che su Jikan è un'operazione pesante lato server e
+    // spesso causa timeout/504). Prendiamo tra le prime 10 pagine, poi
+    // un titolo a caso da quella pagina.
+    const randomPage = Math.floor(Math.random() * 10) + 1;
+    let data = await jikanFetch(
+        `https://api.jikan.moe/v4/anime?genres=${genreId}&limit=25&sfw=true&page=${randomPage}`
+    );
 
-    const lastPage   = Math.min(first.pagination?.last_visible_page ?? 1, 20);
-    const randomPage = Math.floor(Math.random() * lastPage) + 1;
-
-    let list = first.data;
-    if (randomPage !== 1) {
-        const other = await jikanFetch(`${base}&page=${randomPage}`);
-        if (other?.data?.length) list = other.data;
+    // Se la pagina casuale non ha risultati (genere con poche pagine),
+    // riprova una sola volta con la pagina 1 prima di arrenderti.
+    if (!data?.data?.length && randomPage !== 1) {
+        data = await jikanFetch(
+            `https://api.jikan.moe/v4/anime?genres=${genreId}&limit=25&sfw=true&page=1`
+        );
     }
+    if (!data?.data?.length) return null;
 
-    return list[Math.floor(Math.random() * list.length)] ?? null;
+    return data.data[Math.floor(Math.random() * data.data.length)] ?? null;
 }
 
 // ─────────────────────────────────────────────
