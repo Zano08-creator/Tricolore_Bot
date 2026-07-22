@@ -297,31 +297,77 @@ async function getRandomImage(cacheKey, tagSets) {
 // ─────────────────────────────────────────────
 //  ANIME RANDOM (Jikan API — MyAnimeList wrapper, no API key)
 // ─────────────────────────────────────────────
-async function jikanFetch(url) {
-    const controller = new AbortController();
-    const timeoutId  = setTimeout(() => controller.abort(), 10_000);
-    try {
-        const res = await fetch(url, { signal: controller.signal });
-        if (!res.ok) throw new Error(`Jikan HTTP ${res.status}`);
-        return await res.json();
-    } catch (err) {
-        console.error(`[ANIME] Errore fetch (${url}):`, err.message);
-        return null;
-    } finally {
-        clearTimeout(timeoutId);
+async function jikanFetch(url, retries = 2) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId  = setTimeout(() => controller.abort(), 10_000);
+        try {
+            const res = await fetch(url, { signal: controller.signal });
+            if (!res.ok) {
+                // 429 (rate limit) e 5xx (errore/instabilità del server Jikan)
+                // sono spesso temporanei: vale la pena riprovare con un piccolo
+                // ritardo prima di arrendersi definitivamente.
+                const retryable = res.status === 429 || res.status >= 500;
+                if (retryable && attempt < retries) {
+                    clearTimeout(timeoutId);
+                    await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+                    continue;
+                }
+                throw new Error(`Jikan HTTP ${res.status}`);
+            }
+            return await res.json();
+        } catch (err) {
+            const isLast = attempt >= retries;
+            if (!isLast && err.name !== "AbortError") {
+                clearTimeout(timeoutId);
+                await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+                continue;
+            }
+            console.error(`[ANIME] Errore fetch (${url}):`, err.message);
+            return null;
+        } finally {
+            clearTimeout(timeoutId);
+        }
     }
+    return null;
 }
 
 // Cache dei generi ufficiali MyAnimeList, caricata una volta all'avvio
 // e usata per l'autocomplete di /anime (Discord permette max 25 scelte
 // fisse con addChoices, ma i generi MAL sono oltre 40: con l'autocomplete
 // invece la lista può essere completa e filtrabile mentre si scrive).
+// Lista di riserva (ID ufficiali MyAnimeList) usata SOLO se Jikan non
+// risponde nemmeno dopo i retry: così /anime resta comunque utilizzabile.
+const FALLBACK_GENRES = [
+    { name: "Action",         value: "1"  },
+    { name: "Adventure",      value: "2"  },
+    { name: "Comedy",         value: "4"  },
+    { name: "Drama",          value: "8"  },
+    { name: "Fantasy",        value: "10" },
+    { name: "Horror",         value: "14" },
+    { name: "Mystery",        value: "7"  },
+    { name: "Romance",        value: "22" },
+    { name: "Sci-Fi",         value: "24" },
+    { name: "Slice of Life",  value: "36" },
+    { name: "Sports",         value: "30" },
+    { name: "Supernatural",   value: "37" },
+    { name: "Suspense",       value: "41" },
+    { name: "Mecha",         value: "18" },
+    { name: "Music",          value: "19" },
+    { name: "Psychological",  value: "40" },
+    { name: "School",         value: "23" },
+    { name: "Military",       value: "38" },
+    { name: "Historical",     value: "13" },
+    { name: "Isekai",         value: "62" },
+];
+
 let animeGenresCache = []; // [{ name: "Action", value: "1" }, ...]
 
 async function loadAnimeGenres() {
     const data = await jikanFetch("https://api.jikan.moe/v4/genres/anime");
     if (!data?.data?.length) {
-        console.error("[ANIME] Impossibile caricare i generi da Jikan.");
+        console.warn("[ANIME] Jikan irraggiungibile, uso la lista di generi di riserva.");
+        animeGenresCache = FALLBACK_GENRES;
         return;
     }
     animeGenresCache = data.data
@@ -333,7 +379,7 @@ async function loadAnimeGenres() {
 async function getRandomAnime(genreId) {
     // Nessun genere -> endpoint random nativo di Jikan (già filtrato SFW)
     if (!genreId) {
-        const data = await jikanFetch("https://api.jikan.moe/v4/random/anime?sfw");
+        const data = await jikanFetch("https://api.jikan.moe/v4/random/anime?sfw=true");
         return data?.data ?? null;
     }
 
@@ -949,7 +995,21 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.deferReply();
 
         const genreId = interaction.options.getString("genere");
-        const anime   = await getRandomAnime(genreId);
+
+        // Se l'utente ha scritto testo libero senza selezionare un suggerimento
+        // dalla lista (es. l'autocomplete non ha fatto in tempo a rispondere,
+        // o la cache dei generi era vuota), il valore non è un ID numerico valido.
+        // Meglio bloccarlo qui che mandare una query corrotta a Jikan (causa timeout/504).
+        if (genreId && !/^\d+$/.test(genreId)) {
+            await interaction.editReply(
+                `⚠️ Genere non riconosciuto: **${genreId}**.\n` +
+                `Scrivi nel campo "genere" e **seleziona un'opzione dalla lista** che appare, ` +
+                `invece di scrivere testo libero e premere invio.`
+            );
+            return;
+        }
+
+        const anime = await getRandomAnime(genreId);
 
         if (!anime) {
             await interaction.editReply("⚠️ Non sono riuscito a trovare un anime, riprova tra poco.");
@@ -1041,6 +1101,17 @@ setInterval(async () => {
 // ─────────────────────────────────────────────
 //  GESTIONE ERRORI GLOBALI
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+//  RETRY PERIODICO GENERI ANIME (ogni 10 minuti)
+// ─────────────────────────────────────────────
+// Se all'avvio Jikan era irraggiungibile e stiamo usando la lista di
+// fallback, riprova periodicamente a scaricare la lista completa reale.
+setInterval(async () => {
+    if (animeGenresCache !== FALLBACK_GENRES) return; // già caricata quella vera
+    console.log("[ANIME] Ritento il caricamento della lista generi reale da Jikan...");
+    await loadAnimeGenres();
+}, 10 * 60 * 1000);
+
 process.on("unhandledRejection", r => console.error("[UNHANDLED]", r));
 process.on("uncaughtException",  e => console.error("[EXCEPTION]", e.message));
 
