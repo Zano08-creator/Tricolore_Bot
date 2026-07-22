@@ -295,27 +295,42 @@ async function getRandomImage(cacheKey, tagSets) {
 }
 
 // ─────────────────────────────────────────────
-//  ANIME RANDOM (Jikan API — MyAnimeList wrapper, no API key)
+//  ANIME RANDOM (AniList GraphQL API)
 // ─────────────────────────────────────────────
-async function jikanFetch(url, retries = 2) {
+// NOTA: inizialmente usavamo Jikan (wrapper di MyAnimeList), ma il suo
+// endpoint di ricerca si è dimostrato spesso instabile (errori 504 anche
+// sulle richieste più semplici). AniList è mantenuta meglio, non ha
+// rate-limit aggressivi per un uso come il nostro e offre già un filtro
+// nativo per genere, quindi passiamo a quella.
+const ANILIST_URL = "https://graphql.anilist.co";
+
+// Generi che AniList espone ma che vogliamo escludere per restare su
+// contenuti sicuri per un server generico.
+const ANIME_GENRE_EXCLUDE = new Set(["Hentai", "Ecchi"]);
+
+async function anilistQuery(query, variables, retries = 2) {
     for (let attempt = 0; attempt <= retries; attempt++) {
         const controller = new AbortController();
         const timeoutId  = setTimeout(() => controller.abort(), 10_000);
         try {
-            const res = await fetch(url, { signal: controller.signal });
+            const res = await fetch(ANILIST_URL, {
+                method:  "POST",
+                headers: { "Content-Type": "application/json", "Accept": "application/json" },
+                body:    JSON.stringify({ query, variables }),
+                signal:  controller.signal,
+            });
             if (!res.ok) {
-                // 429 (rate limit) e 5xx (errore/instabilità del server Jikan)
-                // sono spesso temporanei: vale la pena riprovare con un piccolo
-                // ritardo prima di arrendersi definitivamente.
                 const retryable = res.status === 429 || res.status >= 500;
                 if (retryable && attempt < retries) {
                     clearTimeout(timeoutId);
                     await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
                     continue;
                 }
-                throw new Error(`Jikan HTTP ${res.status}`);
+                throw new Error(`AniList HTTP ${res.status}`);
             }
-            return await res.json();
+            const json = await res.json();
+            if (json.errors?.length) throw new Error(json.errors.map(e => e.message).join("; "));
+            return json.data;
         } catch (err) {
             const isLast = attempt >= retries;
             if (!isLast && err.name !== "AbortError") {
@@ -323,7 +338,7 @@ async function jikanFetch(url, retries = 2) {
                 await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
                 continue;
             }
-            console.error(`[ANIME] Errore fetch (${url}):`, err.message);
+            console.error("[ANIME] Errore AniList:", err.message);
             return null;
         } finally {
             clearTimeout(timeoutId);
@@ -332,84 +347,70 @@ async function jikanFetch(url, retries = 2) {
     return null;
 }
 
-// Cache dei generi ufficiali MyAnimeList, caricata una volta all'avvio
-// e usata per l'autocomplete di /anime (Discord permette max 25 scelte
-// fisse con addChoices, ma i generi MAL sono oltre 40: con l'autocomplete
-// invece la lista può essere completa e filtrabile mentre si scrive).
-// Lista di riserva (ID ufficiali MyAnimeList) usata SOLO se Jikan non
-// risponde nemmeno dopo i retry: così /anime resta comunque utilizzabile.
+// Lista di riserva, usata SOLO se AniList non risponde nemmeno dopo i retry.
 const FALLBACK_GENRES = [
-    { name: "Action",         value: "1"  },
-    { name: "Adventure",      value: "2"  },
-    { name: "Comedy",         value: "4"  },
-    { name: "Drama",          value: "8"  },
-    { name: "Fantasy",        value: "10" },
-    { name: "Horror",         value: "14" },
-    { name: "Mystery",        value: "7"  },
-    { name: "Romance",        value: "22" },
-    { name: "Sci-Fi",         value: "24" },
-    { name: "Slice of Life",  value: "36" },
-    { name: "Sports",         value: "30" },
-    { name: "Supernatural",   value: "37" },
-    { name: "Suspense",       value: "41" },
-    { name: "Mecha",         value: "18" },
-    { name: "Music",          value: "19" },
-    { name: "Psychological",  value: "40" },
-    { name: "School",         value: "23" },
-    { name: "Military",       value: "38" },
-    { name: "Historical",     value: "13" },
-    { name: "Isekai",         value: "62" },
-];
+    "Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror",
+    "Mahou Shoujo", "Mecha", "Music", "Mystery", "Psychological",
+    "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller",
+].map(name => ({ name, value: name }));
 
-let animeGenresCache = []; // [{ name: "Action", value: "1" }, ...]
+let animeGenresCache = []; // [{ name: "Action", value: "Action" }, ...]
 
 async function loadAnimeGenres() {
-    const data = await jikanFetch("https://api.jikan.moe/v4/genres/anime");
-    if (!data?.data?.length) {
-        console.warn("[ANIME] Jikan irraggiungibile, uso la lista di generi di riserva.");
+    const data = await anilistQuery("query { GenreCollection }", {});
+    if (!data?.GenreCollection?.length) {
+        console.warn("[ANIME] AniList irraggiungibile, uso la lista di generi di riserva.");
         animeGenresCache = FALLBACK_GENRES;
         return;
     }
-    animeGenresCache = data.data
-        .map(g => ({ name: g.name, value: String(g.mal_id) }))
+    animeGenresCache = data.GenreCollection
+        .filter(g => !ANIME_GENRE_EXCLUDE.has(g))
+        .map(g => ({ name: g, value: g }))
         .sort((a, b) => a.name.localeCompare(b.name));
-    console.log(`[ANIME] Caricati ${animeGenresCache.length} generi da Jikan.`);
+    console.log(`[ANIME] Caricati ${animeGenresCache.length} generi da AniList.`);
 }
 
-const ANIME_CACHE_TTL  = 60 * 60 * 1000; // 1 ora
-const animeGenreCache  = new Map(); // genreId -> { list, at }
-
-async function getRandomAnime(genreId) {
-    // Nessun genere -> endpoint random nativo di Jikan (già filtrato SFW)
-    if (!genreId) {
-        const data = await jikanFetch("https://api.jikan.moe/v4/random/anime?sfw=true");
-        return data?.data ?? null;
+const ANIME_QUERY = `
+query ($page: Int, $genre: String) {
+    Page(page: $page, perPage: 25) {
+        media(type: ANIME, isAdult: false, genre: $genre, sort: POPULARITY_DESC) {
+            title { romaji english }
+            description(asHtml: false)
+            coverImage { large }
+            genres
+            episodes
+            status
+            averageScore
+            siteUrl
+        }
     }
+}`;
 
-    // Con genere: usiamo una cache per non dipendere da Jikan ad ogni
-    // singola richiesta. La prima volta che un genere viene richiesto
-    // (o quando la cache scade) scarichiamo 25 anime di quel genere e li
-    // riusiamo per un'ora, pescandone uno a caso ogni volta dal set salvato.
-    const now   = Date.now();
-    const cache = animeGenreCache.get(genreId) ?? { list: [], at: 0 };
+const ANIME_CACHE_TTL = 60 * 60 * 1000; // 1 ora
+const animeGenreCache = new Map(); // genere (o "__all__") -> { list, at }
+
+async function getRandomAnime(genre) {
+    // Chiave di cache unica: senza genere usiamo un "pool" generale.
+    const cacheKey = genre || "__all__";
+    const now       = Date.now();
+    const cache     = animeGenreCache.get(cacheKey) ?? { list: [], at: 0 };
 
     if (!cache.list.length || (now - cache.at) > ANIME_CACHE_TTL) {
-        const randomPage = Math.floor(Math.random() * 10) + 1;
-        let data = await jikanFetch(
-            `https://api.jikan.moe/v4/anime?genres=${genreId}&limit=25&sfw=true&page=${randomPage}`
-        );
-        if (!data?.data?.length && randomPage !== 1) {
-            data = await jikanFetch(
-                `https://api.jikan.moe/v4/anime?genres=${genreId}&limit=25&sfw=true&page=1`
-            );
+        // Pagina scelta a caso tra le prime 20 (25 anime a pagina =
+        // pool di ~500 titoli) per avere varietà senza dover prima
+        // interrogare AniList per sapere quante pagine esistono.
+        const randomPage = Math.floor(Math.random() * 20) + 1;
+        let data = await anilistQuery(ANIME_QUERY, { page: randomPage, genre: genre || null });
+        if (!data?.Page?.media?.length && randomPage !== 1) {
+            data = await anilistQuery(ANIME_QUERY, { page: 1, genre: genre || null });
         }
-        if (data?.data?.length) {
-            cache.list = data.data;
+        if (data?.Page?.media?.length) {
+            cache.list = data.Page.media;
             cache.at   = now;
-            animeGenreCache.set(genreId, cache);
+            animeGenreCache.set(cacheKey, cache);
         }
-        // Se Jikan non risponde ma avevamo già una lista precedente (anche
-        // scaduta), meglio riusare quella vecchia che non restituire nulla.
+        // Se AniList non risponde ma avevamo già una lista precedente
+        // (anche scaduta), meglio riusare quella vecchia che restituire nulla.
     }
 
     if (!cache.list.length) return null;
@@ -1007,47 +1008,61 @@ client.on("interactionCreate", async (interaction) => {
     if (commandName === "anime") {
         await interaction.deferReply();
 
-        const genreId = interaction.options.getString("genere");
+        const genre = interaction.options.getString("genere");
 
-        // Se l'utente ha scritto testo libero senza selezionare un suggerimento
-        // dalla lista (es. l'autocomplete non ha fatto in tempo a rispondere,
-        // o la cache dei generi era vuota), il valore non è un ID numerico valido.
-        // Meglio bloccarlo qui che mandare una query corrotta a Jikan (causa timeout/504).
-        if (genreId && !/^\d+$/.test(genreId)) {
+        // Se l'utente ha scritto testo libero senza selezionare un
+        // suggerimento dalla lista (es. l'autocomplete non ha fatto in
+        // tempo a rispondere, o la cache dei generi era vuota al momento),
+        // il valore non corrisponde a nessun genere reale. Meglio avvisare
+        // qui che mandare una query con un genere inventato ad AniList.
+        const validGenres = new Set(animeGenresCache.map(g => g.value));
+        if (genre && !validGenres.has(genre)) {
             await interaction.editReply(
-                `⚠️ Genere non riconosciuto: **${genreId}**.\n` +
+                `⚠️ Genere non riconosciuto: **${genre}**.\n` +
                 `Scrivi nel campo "genere" e **seleziona un'opzione dalla lista** che appare, ` +
                 `invece di scrivere testo libero e premere invio.`
             );
             return;
         }
 
-        const anime = await getRandomAnime(genreId);
+        const anime = await getRandomAnime(genre);
 
         if (!anime) {
             await interaction.editReply("⚠️ Non sono riuscito a trovare un anime, riprova tra poco.");
             return;
         }
 
-        const titolo    = anime.title_english || anime.title || "Titolo sconosciuto";
-        const sinossi   = (anime.synopsis || "Nessuna sinossi disponibile.").slice(0, 600);
-        const genresStr = (anime.genres ?? []).map(g => g.name).join(", ") || "N/D";
-        const cover     = anime.images?.jpg?.large_image_url ?? anime.images?.jpg?.image_url ?? null;
+        const STATUS_LABELS = {
+            FINISHED:        "✅ Concluso",
+            RELEASING:       "📡 In corso",
+            NOT_YET_RELEASED:"🔜 Non ancora uscito",
+            CANCELLED:       "❌ Cancellato",
+            HIATUS:          "⏸️ In pausa",
+        };
+
+        const titolo    = anime.title?.english || anime.title?.romaji || "Titolo sconosciuto";
+        const sinossi   = (anime.description || "Nessuna descrizione disponibile.")
+                            .replace(/<[^>]+>/g, "") // AniList a volte include tag tipo <br>
+                            .slice(0, 600);
+        const genresStr = (anime.genres ?? []).join(", ") || "N/D";
+        const cover     = anime.coverImage?.large ?? null;
+        const voto      = anime.averageScore ? `${(anime.averageScore / 10).toFixed(1)}/10` : "N/D";
+        const stato     = STATUS_LABELS[anime.status] ?? anime.status ?? "N/D";
 
         const embed = new EmbedBuilder()
             .setColor(0x9b59b6)
             .setAuthor({ name: "📺 Consiglio anime" })
             .setTitle(titolo.slice(0, 256))
-            .setURL(anime.url ?? null)
+            .setURL(anime.siteUrl ?? null)
             .setDescription(sinossi)
             .setImage(cover)
             .addFields(
-                { name: "⭐ Voto",    value: anime.score ? `${anime.score}/10` : "N/D", inline: true },
+                { name: "⭐ Voto",    value: voto, inline: true },
                 { name: "🎬 Episodi", value: anime.episodes ? `${anime.episodes}` : "N/D", inline: true },
-                { name: "📅 Stato",   value: anime.status ?? "N/D", inline: true },
+                { name: "📅 Stato",   value: stato, inline: true },
                 { name: "🏷️ Generi", value: genresStr.slice(0, 1024), inline: false },
             )
-            .setFooter({ text: "Tricolore Bot · dati via Jikan (MyAnimeList)" })
+            .setFooter({ text: "Tricolore Bot · dati via AniList" })
             .setTimestamp();
 
         await interaction.editReply({ embeds: [embed] });
@@ -1117,11 +1132,11 @@ setInterval(async () => {
 // ─────────────────────────────────────────────
 //  RETRY PERIODICO GENERI ANIME (ogni 10 minuti)
 // ─────────────────────────────────────────────
-// Se all'avvio Jikan era irraggiungibile e stiamo usando la lista di
+// Se all'avvio AniList era irraggiungibile e stiamo usando la lista di
 // fallback, riprova periodicamente a scaricare la lista completa reale.
 setInterval(async () => {
     if (animeGenresCache !== FALLBACK_GENRES) return; // già caricata quella vera
-    console.log("[ANIME] Ritento il caricamento della lista generi reale da Jikan...");
+    console.log("[ANIME] Ritento il caricamento della lista generi reale da AniList...");
     await loadAnimeGenres();
 }, 10 * 60 * 1000);
 
