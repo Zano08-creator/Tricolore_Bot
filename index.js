@@ -27,6 +27,23 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 // ─────────────────────────────────────────────
 //  LAVALINK NODES
 // ─────────────────────────────────────────────
+// NOTA IMPORTANTE: i nodi pubblici sotto (serenetia/millohost/trinium) sono
+// server community gratuiti, non gestiti da noi. Il loro uptime e la loro
+// versione Lavalink possono cambiare senza preavviso, ed è la causa più
+// comune di errori "502 / websocket closed" come quelli visti nei log:
+// non è un problema del bot, ma del server remoto che è temporaneamente
+// giù, sovraccarico, o (raramente) è tornato ad una versione incompatibile
+// col protocollo v4 di Shoukaku. Non potendo controllare da qui lo stato
+// live di questi endpoint, se i due nodi restano spesso non disponibili
+// conviene: 1) verificarne manualmente la versione con
+// `curl <host>/version` (deve rispondere 4.x.x), oppure 2) sostituirli con
+// altri nodi aggiornati da liste come https://lavalink-list.darrennathanael.com,
+// oppure 3) affidarsi solo al nodo self-hosted (LAVALINK_HOST), che è
+// sotto il tuo controllo ed è l'opzione più affidabile in assoluto.
+//
+// L'ordine qui sotto è anche l'ordine di preferenza: ensurePlayer() e
+// getAvailableNode() scelgono il PRIMO nodo connesso trovato, quindi il
+// self-hosted (se configurato) viene sempre provato per primo.
 function buildNodeList() {
     const nodes = [];
     if (process.env.LAVALINK_HOST) {
@@ -37,8 +54,16 @@ function buildNodeList() {
             port:   parseInt(process.env.LAVALINK_PORT || "443", 10),
             secure: (process.env.LAVALINK_SSL ?? "true") !== "false",
         });
-        console.log(`[CONFIG] Nodo self-hosted: ${process.env.LAVALINK_HOST}`);
+        console.log(`[CONFIG] Nodo self-hosted (priorità 1): ${process.env.LAVALINK_HOST}`);
+    } else {
+        console.warn(
+            "[CONFIG] Nessun LAVALINK_HOST impostato: il bot dipenderà SOLO da nodi " +
+            "pubblici di terzi, che possono essere instabili o andare offline senza preavviso."
+        );
     }
+
+    // Nodi pubblici di fallback, in ordine di preferenza. Se uno smette di
+    // funzionare stabilmente, rimuovilo da qui o sostituiscilo.
     nodes.push(
         { name: "serenetia-ssl",   url: "lavalinkv4.serenetia.com",    auth: "https://seretia.link/discord",   port: 443, secure: true  },
         { name: "serenetia-nossl", url: "lavalinkv4.serenetia.com",    auth: "https://seretia.link/discord",   port: 80,  secure: false },
