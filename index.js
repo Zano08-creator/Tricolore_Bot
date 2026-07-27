@@ -27,19 +27,29 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 // ─────────────────────────────────────────────
 //  LAVALINK NODES
 // ─────────────────────────────────────────────
-// NOTA IMPORTANTE: i nodi pubblici sotto (serenetia/millohost/trinium) sono
+// NOTA IMPORTANTE: i nodi pubblici sotto (serenetia/millohost/jirayu) sono
 // server community gratuiti, non gestiti da noi. Il loro uptime e la loro
 // versione Lavalink possono cambiare senza preavviso, ed è la causa più
 // comune di errori "502 / websocket closed" come quelli visti nei log:
 // non è un problema del bot, ma del server remoto che è temporaneamente
 // giù, sovraccarico, o (raramente) è tornato ad una versione incompatibile
 // col protocollo v4 di Shoukaku. Non potendo controllare da qui lo stato
-// live di questi endpoint, se i due nodi restano spesso non disponibili
+// live di questi endpoint, se un nodo resta spesso non disponibile
 // conviene: 1) verificarne manualmente la versione con
-// `curl <host>/version` (deve rispondere 4.x.x), oppure 2) sostituirli con
-// altri nodi aggiornati da liste come https://lavalink-list.darrennathanael.com,
-// oppure 3) affidarsi solo al nodo self-hosted (LAVALINK_HOST), che è
-// sotto il tuo controllo ed è l'opzione più affidabile in assoluto.
+// `curl <host>/version` (deve rispondere 4.x.x), oppure 2) sostituirlo con
+// altri nodi aggiornati da liste come https://lavalink-list.darrennathanael.com
+// (o il suo status live https://free.lavalink.rf.gd/list), oppure 3)
+// affidarsi solo al nodo self-hosted (LAVALINK_HOST), che è sotto il tuo
+// controllo ed è l'opzione più affidabile in assoluto.
+//
+// AGGIORNAMENTO (verificato il 27/07/2026 su free.lavalink.rf.gd/list):
+// - "trinium-ssl" (lavalink-v4.triniumhost.com) risultava OFFLINE (0%
+//   uptime, 502 anche sulla loro pagina di stato) -> RIMOSSO dalla lista.
+// - Aggiunto al suo posto il nodo di Jirayu (lavalink.jirayu.net), che
+//   risultava online con Lavalink v4 e ~79% di uptime nei 7 giorni
+//   precedenti. Nota: non è garantito al 100%, essendo anch'esso un nodo
+//   pubblico di terzi: se in futuro dovesse diventare instabile, va
+//   trattato come gli altri (verifica manuale o sostituzione dalla lista).
 //
 // L'ordine qui sotto è anche l'ordine di preferenza: ensurePlayer() e
 // getAvailableNode() scelgono il PRIMO nodo connesso trovato, quindi il
@@ -63,12 +73,12 @@ function buildNodeList() {
     }
 
     // Nodi pubblici di fallback, in ordine di preferenza. Se uno smette di
-    // funzionare stabilmente, rimuovilo da qui o sostituiscilo.
+    // funzionare stabilmente, rimuovilo da qui o sostituiscilo (vedi nota sopra).
     nodes.push(
-        { name: "serenetia-ssl",   url: "lavalinkv4.serenetia.com",    auth: "https://seretia.link/discord",   port: 443, secure: true  },
-        { name: "serenetia-nossl", url: "lavalinkv4.serenetia.com",    auth: "https://seretia.link/discord",   port: 80,  secure: false },
-        { name: "millohost-ssl",   url: "lava-v4.millohost.my.id",     auth: "https://discord.gg/mjS5J2K3ep", port: 443, secure: true  },
-        { name: "trinium-ssl",     url: "lavalink-v4.triniumhost.com", auth: "free",                          port: 443, secure: true  },
+        { name: "serenetia-ssl",   url: "lavalinkv4.serenetia.com", auth: "https://seretia.link/discord",  port: 443, secure: true  },
+        { name: "serenetia-nossl", url: "lavalinkv4.serenetia.com", auth: "https://seretia.link/discord",  port: 80,  secure: false },
+        { name: "millohost-ssl",   url: "lava-v4.millohost.my.id",  auth: "https://discord.gg/mjS5J2K3ep", port: 443, secure: true  },
+        { name: "jirayu-ssl",      url: "lavalink.jirayu.net",      auth: "youshallnotpass",               port: 443, secure: true  },
     );
     return nodes;
 }
@@ -631,8 +641,19 @@ const shoukaku = new Shoukaku(
     }
 );
 
+// FIX: i log di errore/watchdog venivano ripetuti identici ogni pochi
+// secondi per un nodo down (es. il vecchio trinium-ssl), intasando la
+// console. Logghiamo ora solo quando lo stato/messaggio cambia davvero.
+const lastNodeErrorMsg = new Map();
+
 shoukaku.on("ready",      n     => console.log(`[LAVALINK] Connesso: ${n}`));
-shoukaku.on("error",      (n,e) => console.error(`[LAVALINK] Errore ${n}:`, e?.message));
+shoukaku.on("error",      (n,e) => {
+    const msg = e?.message ?? "Errore sconosciuto";
+    if (lastNodeErrorMsg.get(n) !== msg) {
+        console.error(`[LAVALINK] Errore ${n}:`, msg);
+        lastNodeErrorMsg.set(n, msg);
+    }
+});
 shoukaku.on("disconnect", n     => console.warn(`[LAVALINK] Disconnesso: ${n}`));
 
 client.once("ready", async () => {
@@ -1134,19 +1155,29 @@ setInterval(() => {
 // ─────────────────────────────────────────────
 //  NODE WATCHDOG (ogni 30 secondi)
 // ─────────────────────────────────────────────
+// FIX: anche qui evitiamo di ristampare "non connesso, riconnessione..."
+// ad ogni ciclo per lo stesso nodo se è ancora nello stesso stato non-connesso;
+// logghiamo solo il primo tentativo, poi restiamo silenziosi finché non
+// cambia esito (successo o nuovo errore).
+const watchdogWarned = new Set();
+
 setInterval(async () => {
     for (const nodeConfig of LAVALINK_NODES) {
         const node = shoukaku.nodes.get(nodeConfig.name);
         if (!node || node.state !== Constants.State.CONNECTED) {
-            console.warn(`[WATCHDOG] Nodo "${nodeConfig.name}" non connesso, riconnessione...`);
+            if (!watchdogWarned.has(nodeConfig.name)) {
+                console.warn(`[WATCHDOG] Nodo "${nodeConfig.name}" non connesso, riconnessione...`);
+                watchdogWarned.add(nodeConfig.name);
+            }
             try {
                 if (node) shoukaku.removeNode(nodeConfig.name);
                 await new Promise(r => setTimeout(r, 500));
                 shoukaku.addNode(nodeConfig);
-                console.log(`[WATCHDOG] Nodo "${nodeConfig.name}" riaggiunto.`);
             } catch (err) {
                 console.error(`[WATCHDOG] Riconnessione "${nodeConfig.name}" fallita:`, err.message);
             }
+        } else {
+            watchdogWarned.delete(nodeConfig.name);
         }
     }
 }, 30 * 1000);
