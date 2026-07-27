@@ -159,6 +159,8 @@ async function playNext(guildId) {
         await player.playTrack({ track: { encoded: track.encoded } });
         await player.setGlobalVolume(state.volume);
 
+        const lyricsUrl = await findLyricsLink(track.title);
+
         const embed = new EmbedBuilder()
             .setColor(0x1db954)
             .setAuthor({ name: "▶  Ora in riproduzione" })
@@ -172,6 +174,7 @@ async function playNext(guildId) {
                 { name: "🔁 Loop",         value: state.loop,                     inline: true },
                 { name: "🔀 Shuffle",      value: state.shuffle ? "✅" : "❌",    inline: true },
                 { name: "📋 In coda",      value: `${queue.length} brani`,        inline: true },
+                { name: "📝 Testo ->",     value: lyricsUrl ? `[Clicca qui](${lyricsUrl})` : "La seguente canzone non ha un testo", inline: false },
             )
             .setFooter({ text: "Tricolore Music" })
             .setTimestamp();
@@ -227,6 +230,60 @@ async function askAI(domanda) {
     } catch (err) {
         const msg = err.name === "AbortError" ? "Timeout richiesta Groq" : err.message;
         console.error("[AI] Groq fallito:", msg);
+        return null;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+// ─────────────────────────────────────────────
+//  GENIUS: link al testo (NON il testo stesso)
+// ─────────────────────────────────────────────
+// NOTA: qui recuperiamo SOLO il link alla pagina del testo su Genius, mai
+// il testo vero e proprio (che è materiale protetto da copyright e non va
+// riprodotto in chat). Se GENIUS_TOKEN non è configurato, la funzione
+// ritorna sempre null e il bot mostrerà semplicemente "testo non disponibile".
+const GENIUS_TOKEN = process.env.GENIUS_TOKEN;
+const lyricsLinkCache  = new Map(); // "titolo pulito" -> { url, at }
+const LYRICS_CACHE_TTL = 60 * 60 * 1000; // 1 ora
+
+async function findLyricsLink(title) {
+    if (!GENIUS_TOKEN) return null;
+    if (!title) return null;
+
+    // Ripulisce un po' il titolo (rimuove roba tipo "(Official Video)",
+    // "[Lyrics]", "Official Audio", ecc.) per migliorare i risultati di ricerca.
+    const cleanTitle = title
+        .replace(/\(.*?\)|\[.*?\]/g, "")
+        .replace(/official\s*(video|audio|music video|lyrics?)/gi, "")
+        .trim();
+
+    if (!cleanTitle) return null;
+
+    const cacheKey = cleanTitle.toLowerCase();
+    const cached   = lyricsLinkCache.get(cacheKey);
+    if (cached && (Date.now() - cached.at) < LYRICS_CACHE_TTL) return cached.url;
+
+    const controller = new AbortController();
+    const timeoutId  = setTimeout(() => controller.abort(), 8_000);
+    try {
+        const res = await fetch(
+            `https://api.genius.com/search?q=${encodeURIComponent(cleanTitle)}`,
+            {
+                headers: { "Authorization": `Bearer ${GENIUS_TOKEN}` },
+                signal:  controller.signal,
+            }
+        );
+        if (!res.ok) throw new Error(`Genius HTTP ${res.status}`);
+        const data = await res.json();
+        const hit  = data?.response?.hits?.[0]?.result;
+        const url  = hit?.url ?? null;
+
+        lyricsLinkCache.set(cacheKey, { url, at: Date.now() });
+        return url;
+    } catch (err) {
+        const msg = err.name === "AbortError" ? "Timeout richiesta Genius" : err.message;
+        console.error("[LYRICS] Errore ricerca Genius:", msg);
         return null;
     } finally {
         clearTimeout(timeoutId);
