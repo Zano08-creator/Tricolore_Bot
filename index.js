@@ -27,8 +27,8 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 // ─────────────────────────────────────────────
 //  LAVALINK NODES
 // ─────────────────────────────────────────────
-// NOTA IMPORTANTE: i nodi pubblici sotto (serenetia/millohost/jirayu) sono
-// server community gratuiti, non gestiti da noi. Il loro uptime e la loro
+// NOTA IMPORTANTE: i nodi pubblici sotto (serenetia/millohost/jirayu/ajieblogs)
+// sono server community gratuiti, non gestiti da noi. Il loro uptime e la loro
 // versione Lavalink possono cambiare senza preavviso, ed è la causa più
 // comune di errori "502 / websocket closed" come quelli visti nei log:
 // non è un problema del bot, ma del server remoto che è temporaneamente
@@ -50,6 +50,17 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 //   precedenti. Nota: non è garantito al 100%, essendo anch'esso un nodo
 //   pubblico di terzi: se in futuro dovesse diventare instabile, va
 //   trattato come gli altri (verifica manuale o sostituzione dalla lista).
+//
+// FIX (29/07/2026): il nodo jirayu era configurato con porta 443 e
+// secure:true, ma il servizio reale espone la porta 13592 SENZA SSL.
+// Tentare un handshake TLS su quella porta è la causa esatta dei loop di
+// errore "Client network socket disconnected before secure TLS connection
+// was established" / "Unexpected server response: 500" / "read ECONNRESET"
+// / "Websocket closed before a connection was established" visti nei log.
+// Corretto con i valori reali verificati su freelavalink.serenetia.com/list
+// e lavalink.darrennathanael.com (porta 13592, secure:false, password
+// "youshallnotpass"). Aggiunto anche un nodo extra di scorta (ajieblogs),
+// verificato online e Lavalink v4 sulle stesse fonti.
 //
 // L'ordine qui sotto è anche l'ordine di preferenza: ensurePlayer() e
 // getAvailableNode() scelgono il PRIMO nodo connesso trovato, quindi il
@@ -78,7 +89,8 @@ function buildNodeList() {
         { name: "serenetia-ssl",   url: "lavalinkv4.serenetia.com", auth: "https://seretia.link/discord",  port: 443, secure: true  },
         { name: "serenetia-nossl", url: "lavalinkv4.serenetia.com", auth: "https://seretia.link/discord",  port: 80,  secure: false },
         { name: "millohost-ssl",   url: "lava-v4.millohost.my.id",  auth: "https://discord.gg/mjS5J2K3ep", port: 443, secure: true  },
-        { name: "jirayu-ssl",      url: "lavalink.jirayu.net",      auth: "youshallnotpass",               port: 443, secure: true  },
+        { name: "jirayu",          url: "lavalink.jirayu.net",      auth: "youshallnotpass",               port: 13592, secure: false },
+        { name: "ajieblogs-ssl",   url: "lava-v4.ajieblogs.eu.org", auth: "https://dsc.gg/ajidevserver",   port: 443, secure: true  },
     );
     return nodes;
 }
