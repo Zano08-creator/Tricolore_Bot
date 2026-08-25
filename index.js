@@ -328,7 +328,7 @@ function getRandomTsundereGif() {
 // Metti qui i link delle tue GIF: ad ogni /senpai ne verrà mostrata
 // una a caso tra quelle in lista.
 const SENPAI_GIFS = [
-    "https://klipy.com/gifs/love-notice",
+    "https://media1.tenor.com/m/HIKjTn-qqvYAAAAC/drunk-anime.gif",
 ];
 
 function getRandomSenpaiGif() {
