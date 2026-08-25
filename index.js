@@ -323,6 +323,19 @@ function getRandomTsundereGif() {
 }
 
 // ─────────────────────────────────────────────
+//  GIF PER /senpai (scelta a caso tra più link)
+// ─────────────────────────────────────────────
+// Metti qui i link delle tue GIF: ad ogni /senpai ne verrà mostrata
+// una a caso tra quelle in lista.
+const SENPAI_GIFS = [
+    "https://klipy.com/gifs/kiska-sempai-animation-1",
+];
+
+function getRandomSenpaiGif() {
+    return SENPAI_GIFS[Math.floor(Math.random() * SENPAI_GIFS.length)];
+}
+
+// ─────────────────────────────────────────────
 //  IMMAGINI Safebooru (rating:safe) — /waifu
 // ─────────────────────────────────────────────
 // Nota: usiamo SOLO rating:safe per stare tranquilli sui contenuti.
@@ -681,6 +694,10 @@ const commands = [
     new SlashCommandBuilder()
         .setName("tsundere").setDescription("Trasforma (scherzosamente) un utente in una tsundere")
         .addUserOption(o => o.setName("utente").setDescription("L'utente da prendere in giro").setRequired(true))
+        .toJSON(),
+    new SlashCommandBuilder()
+        .setName("senpai").setDescription("Scegli qualcuno come tuo senpai")
+        .addUserOption(o => o.setName("utente").setDescription("La persona da scegliere come senpai").setRequired(true))
         .toJSON(),
     new SlashCommandBuilder()
         .setName("anime").setDescription("Consiglia un anime a caso")
@@ -1112,6 +1129,32 @@ client.on("interactionCreate", async (interaction) => {
             .setAuthor({ name: "😳 B-baka! Non è mica per te..." })
             .setDescription(`✨ **${target.username}** è ufficialmente diventato/a una tsundere! ✨`)
             .setImage(getRandomTsundereGif())
+            .setFooter({ text: "Tricolore Bot" })
+            .setTimestamp();
+
+        await interaction.reply({ content: `<@${target.id}>`, embeds: [embed] });
+        return;
+    }
+
+    // ── /senpai ────────────────────────────────
+    if (commandName === "senpai") {
+        const target = interaction.options.getUser("utente", true);
+
+        if (target.bot) {
+            await interaction.reply({ content: "❌ Non puoi scegliere un bot!", ephemeral: true });
+            return;
+        }
+
+        if (target.id === interaction.user.id) {
+            await interaction.reply({ content: "❌ Non puoi scegliere te stesso come senpai!", ephemeral: true });
+            return;
+        }
+
+        const embed = new EmbedBuilder()
+            .setColor(0xffa500)
+            .setAuthor({ name: "🎓 Nuovo senpai notato!" })
+            .setDescription(`✨ **${interaction.user.username}** ha scelto **${target.username}** come suo senpai! ✨`)
+            .setImage(getRandomSenpaiGif())
             .setFooter({ text: "Tricolore Bot" })
             .setTimestamp();
 
