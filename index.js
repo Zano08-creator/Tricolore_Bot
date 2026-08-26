@@ -347,14 +347,214 @@ const IMAGE_CACHE_TTL   = 30 * 60 * 1000; // 30 minuti
 
 // Personaggi femminili molto noti/apprezzati nel fandom anime, usati come
 // tag per pescare fanart di qualità. Combinati con rating:safe.
+//
+// NOTA: alcuni tag di serie molto recenti o di nicchia (es. Wistoria)
+// potrebbero avere ancora poche fanart su Safebooru, quindi restituire
+// spesso 0 risultati: non è un errore, il tag semplicemente contribuisce
+// meno alla pool finale. Se noti che un personaggio non compare mai,
+// verifica il tag esatto su https://safebooru.org/index.php?page=post&s=list&tags=NOME_TAG
 const WAIFU_TAG_SETS = [
+    // ── Wistoria: Wand and Sword ──
+    `elfaria_albis_serfort rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `colette_loire rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `cerridwen_(wistoria) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `lihanna_(wistoria) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `iris_(wistoria) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `cariott_incindia_wiseman rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `ellenor_ljos_alf rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `clairie_serah rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Monster Musume ──
+    `miia_(monster_musume) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `papi_(monster_musume) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `centorea_shianus rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `suu_(monster_musume) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `rachnera_arachnera rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Re:Zero ──
     `rem_(re:zero) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `emilia_(re:zero) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `ram_(re:zero) rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Sword Art Online ──
     `asuna_(sao) rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Attack on Titan ──
     `mikasa_ackerman rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `historia_reiss rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Darling in the Franxx ──
     `zero_two_(darling_in_the_franxx) rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Demon Slayer ──
     `nezuko_kamado rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `shinobu_kocho rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `mitsuri_kanroji rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Naruto ──
     `hinata_hyuga rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `sakura_haruno rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Kaguya-sama, Konosuba ──
     `chika_fujiwara rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `kaguya_shinomiya rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `megumin rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `aqua_(konosuba) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `darkness_(konosuba) rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Chainsaw Man ──
+    `power_(chainsaw_man) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `makima_(chainsaw_man) rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Spy x Family ──
+    `yor_forger rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `anya_forger rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Rising of the Shield Hero ──
+    `raphtalia rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── My Dress-Up Darling ──
+    `marin_kitagawa rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Fate series ──
+    `saber_(fate) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `rin_tohsaka rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── One Piece ──
+    `nami_(one_piece) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `nico_robin rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `boa_hancock rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Fairy Tail ──
+    `lucy_heartfilia rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `erza_scarlet rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Bleach ──
+    `rukia_kuchiki rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `orihime_inoue rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── My Hero Academia ──
+    `ochako_uraraka rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `tsuyu_asui rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `momo_yaoyorozu rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Jujutsu Kaisen ──
+    `nobara_kugisaki rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `maki_zenin rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Violet Evergarden ──
+    `violet_evergarden rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── K-On! ──
+    `yui_hirasawa rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `mio_akiyama rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Toradora ──
+    `taiga_aisaka rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Oregairu ──
+    `yukinoshita_yukino rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `yuigahama_yui rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Fruits Basket ──
+    `honda_tohru rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Steins;Gate ──
+    `makise_kurisu rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Code Geass ──
+    `c.c._(code_geass) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `kallen_kouzuki rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Overlord ──
+    `albedo_(overlord) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `shalltear_bloodfallen rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Dragon Ball ──
+    `bulma rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `android_18 rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── That Time I Got Reincarnated as a Slime ──
+    `shion_(tensei_shitara_slime_datta_ken) rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `milim_nava rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Mushoku Tensei ──
+    `roxy_migurdia rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `eris_boreas_greyrat rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── DanMachi ──
+    `hestia_(danmachi) rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Nisekoi ──
+    `kirisaki_chitoge rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Toilet-Bound Hanako-kun ──
+    `yugi_amane rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Horimiya ──
+    `hori_kyouko rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Classroom of the Elite ──
+    `kushida_kikyou rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Oshi no Ko ──
+    `hoshino_ai rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Frieren ──
+    `frieren rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Cardcaptor Sakura ──
+    `kinomoto_sakura rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Sailor Moon ──
+    `tsukino_usagi rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Miss Kobayashi's Dragon Maid ──
+    `kobayashi-san_chi_no_maidragon rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `kanna_kamui rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Girls und Panzer ──
+    `nishizumi_miho rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── High School DxD ──
+    `rias_gremory rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `akeno_himejima rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── To Love Ru ──
+    `lala_satalin_deviluke rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Nagatoro ──
+    `hayase_nagatoro rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Rent-a-Girlfriend ──
+    `mizuhara_chizuru rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Bakemonogatari ──
+    `senjougahara_hitagi rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Death Note ──
+    `amane_misa rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Fullmetal Alchemist ──
+    `winry_rockbell rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── One Punch Man ──
+    `tatsumaki rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `fubuki_(one-punch_man) rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Assassination Classroom ──
+    `kayano_kaede rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── The Seven Deadly Sins ──
+    `elizabeth_liones rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `diane_(nanatsu_no_taizai) rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Bocchi the Rock ──
+    `gotou_hitori rating:safe ${SAFEBOORU_EXCLUDE}`,
+
+    // ── Lycoris Recoil ──
+    `nishikigi_chisato rating:safe ${SAFEBOORU_EXCLUDE}`,
+    `inoue_takina rating:safe ${SAFEBOORU_EXCLUDE}`,
 ];
 
 const imageCaches = new Map(); // cacheKey -> { list, at }
