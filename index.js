@@ -224,7 +224,12 @@ async function askAI(domanda) {
                 "Authorization": `Bearer ${GROQ_KEY}`,
             },
             body: JSON.stringify({
-                model:       "llama-3.1-8b-instant",
+                // FIX (01/09/2026): "llama-3.1-8b-instant" è stato deprecato
+                // e rimosso da Groq (annuncio 17/06/2026) -> causava HTTP 404
+                // "[AI] Groq fallito: Groq HTTP 404" (non era un problema di
+                // API key). Sostituito con il modello consigliato da Groq
+                // come alternativa: https://console.groq.com/docs/deprecations
+                model:       "openai/gpt-oss-20b",
                 messages:    [
                     { role: "system", content: SYSTEM_PROMPT },
                     { role: "user",   content: domanda },
