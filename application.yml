@@ -2,9 +2,6 @@ server:
   port: 2333
   address: 0.0.0.0
 lavalink:
-  plugins:
-    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
-      repository: "https://maven.lavalink.dev/releases"
   server:
     password: "${LAVALINK_SERVER_PASSWORD:youshallnotpass}"
     sources:
@@ -37,6 +34,11 @@ lavalink:
     youtubeSearchEnabled: true
     soundcloudSearchEnabled: true
     gc-warnings: true
+# ─────────────────────────────────────────────
+# NOTA: i plugin (youtube-plugin 1.18.2 e lavasrc-plugin 4.8.3) non sono più
+# dichiarati qui sotto "lavalink: plugins:". Maven di Lavalink restituiva 404,
+# quindi i jar vengono scaricati da GitHub direttamente nel Dockerfile e messi
+# in /opt/Lavalink/plugins. Per aggiornarli, cambia gli URL nel Dockerfile.
 # ─────────────────────────────────────────────
 # RIGENERAZIONE TOKEN OAUTH YOUTUBE (token scaduto dopo ~3 mesi)
 # ─────────────────────────────────────────────
