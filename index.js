@@ -49,7 +49,11 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 //   con i nodi "Nazha Free Lavalink" (Lavalink v4.2.2, SSL, porta 443):
 //   https://github.com/knownasrazi/nazha-free-lavalink
 //   Sono nodi recenti (settembre 2026) e non verificati dal codice: controlla
-//   con curl che rispondano. "jirayu" resta come riserva.
+//   con curl che rispondano.
+// - 01/10/2026 (sera): rimossi "nazha-sg3" (DNS ENOTFOUND: l'host non esiste
+//   più) e "jirayu" (HTTP 404 sul websocket: nodo spento). Restano
+//   nazha-us / nazha-sg1 / nazha-sg2. Watchdog corretto: non rimuove più i
+//   nodi in CONNECTING/RECONNECTING (li gestisce già Shoukaku).
 //
 // L'ordine qui sotto è anche l'ordine di preferenza: ensurePlayer() e
 // getAvailableNode() scelgono il PRIMO nodo connesso trovato, quindi il
@@ -78,8 +82,6 @@ function buildNodeList() {
         { name: "nazha-us",  url: "lavalink.nazha.online", auth: "nazhafreelava",                 port: 443,   secure: true  },
         { name: "nazha-sg1", url: "sg-1.nazha.online",     auth: "https://discord.gg/XeSCnk57ZF", port: 443,   secure: true  },
         { name: "nazha-sg2", url: "sg-2.nazha.online",     auth: "https://discord.gg/XeSCnk57ZF", port: 443,   secure: true  },
-        { name: "nazha-sg3", url: "sg-3.nazha.online",     auth: "https://discord.gg/XeSCnk57ZF", port: 443,   secure: true  },
-        { name: "jirayu",    url: "lavalink.jirayu.net",   auth: "youshallnotpass",               port: 13592, secure: false },
     );
     return nodes;
 }
@@ -1461,29 +1463,48 @@ setInterval(() => {
 // ─────────────────────────────────────────────
 //  NODE WATCHDOG (ogni 30 secondi)
 // ─────────────────────────────────────────────
-// FIX: anche qui evitiamo di ristampare "non connesso, riconnessione..."
-// ad ogni ciclo per lo stesso nodo se è ancora nello stesso stato non-connesso;
-// logghiamo solo il primo tentativo, poi restiamo silenziosi finché non
-// cambia esito (successo o nuovo errore).
+// FIX: il watchdog rimuoveva e riaggiungeva ogni nodo non CONNECTED, anche
+// quelli in CONNECTING/RECONNECTING/NEARLY, interrompendo i tentativi di
+// riconnessione già gestiti da Shoukaku (reconnectTries/reconnectInterval).
+// Ora interviene solo su nodi assenti (rimossi da Shoukaku dopo aver esaurito
+// i tentativi) o DISCONNECTED. Logghiamo solo il primo tentativo, poi restiamo
+// silenziosi finché il nodo non torna connesso.
 const watchdogWarned = new Set();
 
 setInterval(async () => {
     for (const nodeConfig of LAVALINK_NODES) {
         const node = shoukaku.nodes.get(nodeConfig.name);
-        if (!node || node.state !== Constants.State.CONNECTED) {
+
+        // Nodo rimosso da Shoukaku (tentativi esauriti): rimettilo.
+        if (!node) {
             if (!watchdogWarned.has(nodeConfig.name)) {
-                console.warn(`[WATCHDOG] Nodo "${nodeConfig.name}" non connesso, riconnessione...`);
+                console.warn(`[WATCHDOG] Nodo "${nodeConfig.name}" assente, lo riaggiungo...`);
+                watchdogWarned.add(nodeConfig.name);
+            }
+            try { shoukaku.addNode(nodeConfig); }
+            catch (err) { console.error(`[WATCHDOG] addNode "${nodeConfig.name}" fallito:`, err.message); }
+            continue;
+        }
+
+        if (node.state === Constants.State.CONNECTED) {
+            watchdogWarned.delete(nodeConfig.name);
+            continue;
+        }
+
+        // Solo DISCONNECTED: CONNECTING / RECONNECTING / NEARLY li gestisce
+        // già Shoukaku, rimuoverli qui interromperebbe i tentativi in corso.
+        if (node.state === Constants.State.DISCONNECTED) {
+            if (!watchdogWarned.has(nodeConfig.name)) {
+                console.warn(`[WATCHDOG] Nodo "${nodeConfig.name}" disconnesso, riprovo...`);
                 watchdogWarned.add(nodeConfig.name);
             }
             try {
-                if (node) shoukaku.removeNode(nodeConfig.name);
+                shoukaku.removeNode(nodeConfig.name);
                 await new Promise(r => setTimeout(r, 500));
                 shoukaku.addNode(nodeConfig);
             } catch (err) {
                 console.error(`[WATCHDOG] Riconnessione "${nodeConfig.name}" fallita:`, err.message);
             }
-        } else {
-            watchdogWarned.delete(nodeConfig.name);
         }
     }
 }, 30 * 1000);
