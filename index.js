@@ -27,40 +27,29 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 // ─────────────────────────────────────────────
 //  LAVALINK NODES
 // ─────────────────────────────────────────────
-// NOTA IMPORTANTE: i nodi pubblici sotto (serenetia/millohost/jirayu/ajieblogs)
-// sono server community gratuiti, non gestiti da noi. Il loro uptime e la loro
-// versione Lavalink possono cambiare senza preavviso, ed è la causa più
-// comune di errori "502 / websocket closed" come quelli visti nei log:
-// non è un problema del bot, ma del server remoto che è temporaneamente
-// giù, sovraccarico, o (raramente) è tornato ad una versione incompatibile
-// col protocollo v4 di Shoukaku. Non potendo controllare da qui lo stato
-// live di questi endpoint, se un nodo resta spesso non disponibile
-// conviene: 1) verificarne manualmente la versione con
-// `curl <host>/version` (deve rispondere 4.x.x), oppure 2) sostituirlo con
-// altri nodi aggiornati da liste come https://lavalink-list.darrennathanael.com
-// (o il suo status live https://free.lavalink.rf.gd/list), oppure 3)
-// affidarsi solo al nodo self-hosted (LAVALINK_HOST), che è sotto il tuo
-// controllo ed è l'opzione più affidabile in assoluto.
+// NOTA IMPORTANTE: i nodi pubblici sotto sono server community gratuiti,
+// non gestiti da noi. Il loro uptime e la loro versione Lavalink possono
+// cambiare senza preavviso, ed è la causa più comune di errori
+// "502 / websocket closed": non è un problema del bot, ma del server remoto
+// che è temporaneamente giù, sovraccarico, o (raramente) è tornato ad una
+// versione incompatibile col protocollo v4 di Shoukaku. Se un nodo resta
+// spesso non disponibile conviene: 1) verificarne manualmente la versione con
+// `curl https://<host>/version` (deve rispondere 4.x.x), oppure 2) sostituirlo
+// con altri nodi da liste community aggiornate, oppure 3) affidarsi solo al
+// nodo self-hosted (LAVALINK_HOST), che è sotto il tuo controllo ed è
+// l'opzione più affidabile in assoluto.
 //
-// AGGIORNAMENTO (verificato il 27/07/2026 su free.lavalink.rf.gd/list):
-// - "trinium-ssl" (lavalink-v4.triniumhost.com) risultava OFFLINE (0%
-//   uptime, 502 anche sulla loro pagina di stato) -> RIMOSSO dalla lista.
-// - Aggiunto al suo posto il nodo di Jirayu (lavalink.jirayu.net), che
-//   risultava online con Lavalink v4 e ~79% di uptime nei 7 giorni
-//   precedenti. Nota: non è garantito al 100%, essendo anch'esso un nodo
-//   pubblico di terzi: se in futuro dovesse diventare instabile, va
-//   trattato come gli altri (verifica manuale o sostituzione dalla lista).
-//
-// FIX (29/07/2026): il nodo jirayu era configurato con porta 443 e
-// secure:true, ma il servizio reale espone la porta 13592 SENZA SSL.
-// Tentare un handshake TLS su quella porta è la causa esatta dei loop di
-// errore "Client network socket disconnected before secure TLS connection
-// was established" / "Unexpected server response: 500" / "read ECONNRESET"
-// / "Websocket closed before a connection was established" visti nei log.
-// Corretto con i valori reali verificati su freelavalink.serenetia.com/list
-// e lavalink.darrennathanael.com (porta 13592, secure:false, password
-// "youshallnotpass"). Aggiunto anche un nodo extra di scorta (ajieblogs),
-// verificato online e Lavalink v4 sulle stesse fonti.
+// STORICO:
+// - 27/07/2026: rimosso "trinium-ssl" (offline), aggiunto "jirayu".
+// - 29/07/2026: corretto "jirayu" (porta 13592, secure:false, password
+//   "youshallnotpass"): il TLS su quella porta causava i loop di errore
+//   "Client network socket disconnected before secure TLS connection was
+//   established" / "Unexpected server response: 500" / "read ECONNRESET".
+// - 01/10/2026: sostituiti i vecchi nodi serenetia / millohost / ajieblogs
+//   con i nodi "Nazha Free Lavalink" (Lavalink v4.2.2, SSL, porta 443):
+//   https://github.com/knownasrazi/nazha-free-lavalink
+//   Sono nodi recenti (settembre 2026) e non verificati dal codice: controlla
+//   con curl che rispondano. "jirayu" resta come riserva.
 //
 // L'ordine qui sotto è anche l'ordine di preferenza: ensurePlayer() e
 // getAvailableNode() scelgono il PRIMO nodo connesso trovato, quindi il
@@ -86,11 +75,11 @@ function buildNodeList() {
     // Nodi pubblici di fallback, in ordine di preferenza. Se uno smette di
     // funzionare stabilmente, rimuovilo da qui o sostituiscilo (vedi nota sopra).
     nodes.push(
-        { name: "serenetia-ssl",   url: "lavalinkv4.serenetia.com", auth: "https://seretia.link/discord",  port: 443, secure: true  },
-        { name: "serenetia-nossl", url: "lavalinkv4.serenetia.com", auth: "https://seretia.link/discord",  port: 80,  secure: false },
-        { name: "millohost-ssl",   url: "lava-v4.millohost.my.id",  auth: "https://discord.gg/mjS5J2K3ep", port: 443, secure: true  },
-        { name: "jirayu",          url: "lavalink.jirayu.net",      auth: "youshallnotpass",               port: 13592, secure: false },
-        { name: "ajieblogs-ssl",   url: "lava-v4.ajieblogs.eu.org", auth: "https://dsc.gg/ajidevserver",   port: 443, secure: true  },
+        { name: "nazha-us",  url: "lavalink.nazha.online", auth: "nazhafreelava",                 port: 443,   secure: true  },
+        { name: "nazha-sg1", url: "sg-1.nazha.online",     auth: "https://discord.gg/XeSCnk57ZF", port: 443,   secure: true  },
+        { name: "nazha-sg2", url: "sg-2.nazha.online",     auth: "https://discord.gg/XeSCnk57ZF", port: 443,   secure: true  },
+        { name: "nazha-sg3", url: "sg-3.nazha.online",     auth: "https://discord.gg/XeSCnk57ZF", port: 443,   secure: true  },
+        { name: "jirayu",    url: "lavalink.jirayu.net",   auth: "youshallnotpass",               port: 13592, secure: false },
     );
     return nodes;
 }
@@ -933,8 +922,8 @@ const shoukaku = new Shoukaku(
 );
 
 // FIX: i log di errore/watchdog venivano ripetuti identici ogni pochi
-// secondi per un nodo down (es. il vecchio trinium-ssl), intasando la
-// console. Logghiamo ora solo quando lo stato/messaggio cambia davvero.
+// secondi per un nodo down, intasando la console. Logghiamo ora solo
+// quando lo stato/messaggio cambia davvero.
 const lastNodeErrorMsg = new Map();
 
 shoukaku.on("ready",      n     => console.log(`[LAVALINK] Connesso: ${n}`));
@@ -1500,9 +1489,6 @@ setInterval(async () => {
 }, 30 * 1000);
 
 // ─────────────────────────────────────────────
-//  GESTIONE ERRORI GLOBALI
-// ─────────────────────────────────────────────
-// ─────────────────────────────────────────────
 //  RETRY PERIODICO GENERI ANIME (ogni 10 minuti)
 // ─────────────────────────────────────────────
 // Se all'avvio AniList era irraggiungibile e stiamo usando la lista di
@@ -1513,6 +1499,9 @@ setInterval(async () => {
     await loadAnimeGenres();
 }, 10 * 60 * 1000);
 
+// ─────────────────────────────────────────────
+//  GESTIONE ERRORI GLOBALI
+// ─────────────────────────────────────────────
 process.on("unhandledRejection", r => console.error("[UNHANDLED]", r));
 process.on("uncaughtException",  e => console.error("[EXCEPTION]", e.message));
 
