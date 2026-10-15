@@ -731,6 +731,120 @@ async function getRandomAnime(genre) {
 }
 
 // ─────────────────────────────────────────────
+//  CANZONE RANDOM (Deezer API, nessuna chiave richiesta)
+// ─────────────────────────────────────────────
+// Deezer espone gratuitamente l'elenco dei generi e, per ogni genere,
+// la classifica dei brani e gli artisti più noti. Per avere varietà
+// uniamo la classifica con le top track di alcuni artisti casuali del
+// genere, poi teniamo il tutto in cache per un'ora.
+const DEEZER_URL          = "https://api.deezer.com";
+const SONG_CACHE_TTL      = 60 * 60 * 1000; // 1 ora
+const SONG_ALLOW_EXPLICIT = true;           // metti false per escludere brani "explicit"
+
+async function deezerGet(path) {
+    const controller = new AbortController();
+    const timeoutId  = setTimeout(() => controller.abort(), 10_000);
+    try {
+        const res = await fetch(`${DEEZER_URL}${path}`, { signal: controller.signal });
+        if (!res.ok) throw new Error(`Deezer HTTP ${res.status}`);
+        const json = await res.json();
+        // Deezer risponde 200 anche in caso di errore, con un campo "error".
+        if (json?.error) throw new Error(json.error.message || "Errore Deezer");
+        return json;
+    } catch (err) {
+        const msg = err.name === "AbortError" ? "Timeout richiesta Deezer" : err.message;
+        console.error(`[SONG] Errore Deezer (${path}):`, msg);
+        return null;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+// Lista di riserva, usata SOLO se Deezer non risponde.
+const FALLBACK_SONG_GENRES = [
+    { name: "Pop",         value: "132" },
+    { name: "Rap/Hip Hop", value: "116" },
+    { name: "Rock",        value: "152" },
+    { name: "Dance",       value: "113" },
+    { name: "R&B",         value: "165" },
+    { name: "Alternative", value: "85"  },
+    { name: "Electro",     value: "106" },
+    { name: "Reggae",      value: "144" },
+    { name: "Jazz",        value: "129" },
+    { name: "Classica",    value: "98"  },
+    { name: "Metal",       value: "464" },
+    { name: "Latin Music", value: "197" },
+    { name: "Country",     value: "84"  },
+    { name: "Blues",       value: "153" },
+    { name: "Soul & Funk", value: "169" },
+];
+
+let songGenresCache = []; // [{ name: "Pop", value: "132" }, ...]
+
+async function loadSongGenres() {
+    const data = await deezerGet("/genre");
+    if (!data?.data?.length) {
+        console.warn("[SONG] Deezer irraggiungibile, uso la lista di generi di riserva.");
+        songGenresCache = FALLBACK_SONG_GENRES;
+        return;
+    }
+    songGenresCache = data.data
+        .filter(g => g.id !== 0) // 0 = "Tutti": lo usiamo di default quando non si sceglie nulla
+        .map(g => ({ name: g.name, value: String(g.id) }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    console.log(`[SONG] Caricati ${songGenresCache.length} generi da Deezer.`);
+}
+
+async function buildSongPool(genreId) {
+    const pool = [];
+
+    const chart = await deezerGet(`/chart/${genreId}/tracks?limit=100`);
+    if (chart?.data?.length) pool.push(...chart.data);
+
+    // Per un genere specifico aggiungiamo anche le top track di 5 artisti a caso.
+    if (genreId !== "0") {
+        const artistsRes = await deezerGet(`/genre/${genreId}/artists`);
+        const artists    = artistsRes?.data ?? [];
+        const picked     = [...artists].sort(() => Math.random() - 0.5).slice(0, 5);
+        const tops       = await Promise.all(
+            picked.map(a => deezerGet(`/artist/${a.id}/top?limit=15`))
+        );
+        for (const t of tops) if (t?.data?.length) pool.push(...t.data);
+    }
+
+    // Dedup per id + filtri di sicurezza
+    const unique = new Map();
+    for (const t of pool) {
+        if (!t?.id || !t.title || !t.link || !t.artist?.name) continue;
+        if (!SONG_ALLOW_EXPLICIT && t.explicit_lyrics) continue;
+        unique.set(t.id, t);
+    }
+    return [...unique.values()];
+}
+
+const songCache = new Map(); // genreId (o "0") -> { list, at }
+
+async function getRandomSong(genreId) {
+    const key   = genreId || "0";
+    const now   = Date.now();
+    const cache = songCache.get(key) ?? { list: [], at: 0 };
+
+    if (!cache.list.length || (now - cache.at) > SONG_CACHE_TTL) {
+        const fresh = await buildSongPool(key);
+        if (fresh.length) {
+            cache.list = fresh;
+            cache.at   = now;
+            songCache.set(key, cache);
+        }
+        // Se Deezer non risponde ma avevamo una lista precedente (anche
+        // scaduta), meglio riusare quella vecchia che restituire nulla.
+    }
+
+    if (!cache.list.length) return null;
+    return cache.list[Math.floor(Math.random() * cache.list.length)] ?? null;
+}
+
+// ─────────────────────────────────────────────
 //  HELPERS
 // ─────────────────────────────────────────────
 // FIX: Constants.State.CONNECTED vale 2, non 1 (1 = NEARLY, uno stato
@@ -902,6 +1016,13 @@ const commands = [
              .setDescription("Filtra per genere (facoltativo, scrivi per cercare)")
              .setAutocomplete(true)
         ).toJSON(),
+    new SlashCommandBuilder()
+        .setName("song").setDescription("Consiglia una canzone a caso")
+        .addStringOption(o =>
+            o.setName("genere")
+             .setDescription("Filtra per genere (facoltativo, scrivi per cercare)")
+             .setAutocomplete(true)
+        ).toJSON(),
 ];
 
 // ─────────────────────────────────────────────
@@ -941,6 +1062,7 @@ shoukaku.on("disconnect", n     => console.warn(`[LAVALINK] Disconnesso: ${n}`))
 client.once("ready", async () => {
     console.log(`[BOT] Online come ${client.user.tag}`);
     await loadAnimeGenres();
+    await loadSongGenres();
     const rest = new REST({ version: "10" }).setToken(TOKEN);
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
     console.log("[BOT] Comandi registrati.");
@@ -951,11 +1073,21 @@ client.once("ready", async () => {
 // ─────────────────────────────────────────────
 client.on("interactionCreate", async (interaction) => {
 
-    // ── Autocomplete /anime genere ─────────────
+    // ── Autocomplete /anime e /song genere ─────
     if (interaction.isAutocomplete()) {
+        const focused = interaction.options.getFocused().toLowerCase();
+
         if (interaction.commandName === "anime") {
-            const focused = interaction.options.getFocused().toLowerCase();
             const filtered = animeGenresCache
+                .filter(g => g.name.toLowerCase().includes(focused))
+                .slice(0, 25);
+            await interaction.respond(
+                filtered.map(g => ({ name: g.name, value: g.value }))
+            ).catch(() => {});
+        }
+
+        if (interaction.commandName === "song") {
+            const filtered = songGenresCache
                 .filter(g => g.name.toLowerCase().includes(focused))
                 .slice(0, 25);
             await interaction.respond(
@@ -1422,6 +1554,51 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.editReply({ embeds: [embed] });
         return;
     }
+
+    // ── /song ──────────────────────────────────
+    if (commandName === "song") {
+        await interaction.deferReply();
+
+        const genreId = interaction.options.getString("genere"); // ID Deezer oppure null
+
+        // Stesso controllo di /anime: se l'utente scrive testo libero
+        // senza scegliere un suggerimento, il valore non è un ID valido.
+        const genre = genreId ? songGenresCache.find(g => g.value === genreId) : null;
+        if (genreId && !genre) {
+            await interaction.editReply(
+                `⚠️ Genere non riconosciuto: **${genreId}**.\n` +
+                `Scrivi nel campo "genere" e **seleziona un'opzione dalla lista** che appare, ` +
+                `invece di scrivere testo libero e premere invio.`
+            );
+            return;
+        }
+
+        const song = await getRandomSong(genreId);
+        if (!song) {
+            await interaction.editReply("⚠️ Non sono riuscito a trovare una canzone, riprova tra poco.");
+            return;
+        }
+
+        const playQuery = `${song.artist.name} - ${song.title}`;
+        const embed = new EmbedBuilder()
+            .setColor(0xa238ff)
+            .setAuthor({ name: "🎧 Canzone consigliata" })
+            .setTitle(song.title.slice(0, 256))
+            .setURL(song.link)
+            .setThumbnail(song.album?.cover_xl ?? song.album?.cover_big ?? null)
+            .addFields(
+                { name: "👤 Artista",  value: song.artist.name.slice(0, 1024),             inline: true },
+                { name: "💿 Album",    value: (song.album?.title ?? "N/D").slice(0, 1024), inline: true },
+                { name: "⏱ Durata",   value: formatDuration((song.duration ?? 0) * 1000), inline: true },
+                { name: "🏷️ Genere",  value: genre?.name ?? "Tutti i generi",             inline: true },
+                { name: "▶️ Vuoi ascoltarla?", value: `Usa \`/play query:${playQuery.slice(0, 150)}\``, inline: false },
+            )
+            .setFooter({ text: "Tricolore Bot · dati via Deezer" })
+            .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
+        return;
+    }
 });
 
 // ─────────────────────────────────────────────
@@ -1518,6 +1695,15 @@ setInterval(async () => {
     if (animeGenresCache !== FALLBACK_GENRES) return; // già caricata quella vera
     console.log("[ANIME] Ritento il caricamento della lista generi reale da AniList...");
     await loadAnimeGenres();
+}, 10 * 60 * 1000);
+
+// ─────────────────────────────────────────────
+//  RETRY PERIODICO GENERI CANZONI (ogni 10 minuti)
+// ─────────────────────────────────────────────
+setInterval(async () => {
+    if (songGenresCache !== FALLBACK_SONG_GENRES) return; // già caricata quella vera
+    console.log("[SONG] Ritento il caricamento della lista generi reale da Deezer...");
+    await loadSongGenres();
 }, 10 * 60 * 1000);
 
 // ─────────────────────────────────────────────
