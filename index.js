@@ -42,18 +42,19 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 // STORICO:
 // - 27/07/2026: rimosso "trinium-ssl" (offline), aggiunto "jirayu".
 // - 29/07/2026: corretto "jirayu" (porta 13592, secure:false, password
-//   "youshallnotpass"): il TLS su quella porta causava i loop di errore
-//   "Client network socket disconnected before secure TLS connection was
-//   established" / "Unexpected server response: 500" / "read ECONNRESET".
+//   "youshallnotpass"): il TLS su quella porta causava i loop di errore.
 // - 01/10/2026: sostituiti i vecchi nodi serenetia / millohost / ajieblogs
 //   con i nodi "Nazha Free Lavalink" (Lavalink v4.2.2, SSL, porta 443):
 //   https://github.com/knownasrazi/nazha-free-lavalink
-//   Sono nodi recenti (settembre 2026) e non verificati dal codice: controlla
-//   con curl che rispondano.
-// - 01/10/2026 (sera): rimossi "nazha-sg3" (DNS ENOTFOUND: l'host non esiste
-//   più) e "jirayu" (HTTP 404 sul websocket: nodo spento). Restano
-//   nazha-us / nazha-sg1 / nazha-sg2. Watchdog corretto: non rimuove più i
-//   nodi in CONNECTING/RECONNECTING (li gestisce già Shoukaku).
+// - 01/10/2026 (sera): rimossi "nazha-sg3" (DNS ENOTFOUND) e "jirayu"
+//   (HTTP 404 sul websocket). Watchdog corretto: non rimuove più i nodi in
+//   CONNECTING/RECONNECTING (li gestisce già Shoukaku).
+// - 21/10/2026: aggiunti i 4 nodi HeavenCloud (EU / India / US / SG, v4, SSL,
+//   porta 443, password "heavencloud"):
+//   https://github.com/Manaseditz10/lavalink-hosting
+//   Mantenuti nazha-us / nazha-sg1 / nazha-sg2 (health check 21/09/2026).
+//   Corretto il campo "url": in Shoukaku v4 deve essere "host:porta" (il campo
+//   separato "port" viene ignorato).
 //
 // L'ordine qui sotto è anche l'ordine di preferenza: ensurePlayer() e
 // getAvailableNode() scelgono il PRIMO nodo connesso trovato, quindi il
@@ -61,14 +62,15 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 function buildNodeList() {
     const nodes = [];
     if (process.env.LAVALINK_HOST) {
+        const host = process.env.LAVALINK_HOST;
+        const port = parseInt(process.env.LAVALINK_PORT || "443", 10);
         nodes.push({
             name:   "self-hosted",
-            url:    process.env.LAVALINK_HOST,
+            url:    `${host}:${port}`,
             auth:   process.env.LAVALINK_PASS || "youshallnotpass",
-            port:   parseInt(process.env.LAVALINK_PORT || "443", 10),
             secure: (process.env.LAVALINK_SSL ?? "true") !== "false",
         });
-        console.log(`[CONFIG] Nodo self-hosted (priorità 1): ${process.env.LAVALINK_HOST}`);
+        console.log(`[CONFIG] Nodo self-hosted (priorità 1): ${host}:${port}`);
     } else {
         console.warn(
             "[CONFIG] Nessun LAVALINK_HOST impostato: il bot dipenderà SOLO da nodi " +
@@ -76,12 +78,19 @@ function buildNodeList() {
         );
     }
 
-    // Nodi pubblici di fallback, in ordine di preferenza. Se uno smette di
-    // funzionare stabilmente, rimuovilo da qui o sostituiscilo (vedi nota sopra).
+    // Nodi pubblici di fallback (Lavalink v4, SSL, porta 443), in ordine di
+    // preferenza. Se uno smette di funzionare stabilmente, rimuovilo da qui
+    // o sostituiscilo (vedi nota sopra).
     nodes.push(
-        { name: "nazha-us",  url: "lavalink.nazha.online", auth: "nazhafreelava",                 port: 443,   secure: true  },
-        { name: "nazha-sg1", url: "sg-1.nazha.online",     auth: "https://discord.gg/XeSCnk57ZF", port: 443,   secure: true  },
-        { name: "nazha-sg2", url: "sg-2.nazha.online",     auth: "https://discord.gg/XeSCnk57ZF", port: 443,   secure: true  },
+        // HeavenCloud (Europa per primo: latenza minore dall'Italia)
+        { name: "heaven-eu", url: "eu.lavalink.heavencloud.in:443", auth: "heavencloud", secure: true },
+        { name: "heaven-in", url: "lavalink.heavencloud.in:443",    auth: "heavencloud", secure: true },
+        { name: "heaven-us", url: "us.lavalink.heavencloud.in:443", auth: "heavencloud", secure: true },
+        { name: "heaven-sg", url: "sg.lavalink.heavencloud.in:443", auth: "heavencloud", secure: true },
+        // Nazha
+        { name: "nazha-us",  url: "lavalink.nazha.online:443", auth: "nazhafreelava",                 secure: true },
+        { name: "nazha-sg1", url: "sg-1.nazha.online:443",     auth: "https://discord.gg/XeSCnk57ZF", secure: true },
+        { name: "nazha-sg2", url: "sg-2.nazha.online:443",     auth: "https://discord.gg/XeSCnk57ZF", secure: true },
     );
     return nodes;
 }
