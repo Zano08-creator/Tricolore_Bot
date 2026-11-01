@@ -55,6 +55,12 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 //   Mantenuti nazha-us / nazha-sg1 / nazha-sg2 (health check 21/09/2026).
 //   Corretto il campo "url": in Shoukaku v4 deve essere "host:porta" (il campo
 //   separato "port" viene ignorato).
+// - 01/11/2026: ampliata la lista di fallback a 11 nodi pubblici: riaggiunti
+//   "nazha-sg3" (ancora elencato come attivo nella lista DarrenOfficial,
+//   PR #824) e i due nodi AjieDev v4 ("ajie-v4" e "serenetia-v4", in coda
+//   perché sono server di sviluppo con uptime incostante). I nodi che non
+//   rispondono vengono semplicemente ignorati: Shoukaku/watchdog continuano
+//   a ritentare in background senza bloccare il bot.
 //
 // L'ordine qui sotto è anche l'ordine di preferenza: ensurePlayer() e
 // getAvailableNode() scelgono il PRIMO nodo connesso trovato, quindi il
@@ -91,6 +97,10 @@ function buildNodeList() {
         { name: "nazha-us",  url: "lavalink.nazha.online:443", auth: "nazhafreelava",                 secure: true },
         { name: "nazha-sg1", url: "sg-1.nazha.online:443",     auth: "https://discord.gg/XeSCnk57ZF", secure: true },
         { name: "nazha-sg2", url: "sg-2.nazha.online:443",     auth: "https://discord.gg/XeSCnk57ZF", secure: true },
+        { name: "nazha-sg3", url: "sg-3.nazha.online:443",     auth: "https://discord.gg/XeSCnk57ZF", secure: true },
+        // AjieDev (server di sviluppo: uptime meno affidabile, quindi in coda)
+        { name: "ajie-v4",      url: "lava-v4.ajieblogs.eu.org:443", auth: "https://dsc.gg/ajidevserver", secure: true },
+        { name: "serenetia-v4", url: "lavalinkv4.serenetia.com:443", auth: "https://dsc.gg/ajidevserver", secure: true },
     );
     return nodes;
 }
