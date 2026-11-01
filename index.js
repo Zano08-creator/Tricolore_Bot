@@ -362,7 +362,7 @@ const CATBOY_GIFS = [
 ];
 
 const CATGIRL_GIFS = [
-    "https://i.imgur.com/599hkK5.gif",
+    "https://i.imgur.com/dsZv1sP.gif",
 ];
 
 function getRandomCatGif(tipo) {
