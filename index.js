@@ -358,11 +358,11 @@ function getRandomSenpaiGif() {
 // Il link deve puntare DIRETTAMENTE al file (finire in .gif), non alla
 // pagina di Imgur. Puoi aggiungerne quante vuoi, separate da virgola.
 const CATBOY_GIFS = [
-    "https://imgur.com/a/QnMwP3T",
+    "https://i.imgur.com/Ap6xcaa.gif",
 ];
 
 const CATGIRL_GIFS = [
-    "https://imgur.com/a/lHnQbJn",
+    "https://i.imgur.com/599hkK5.gif",
 ];
 
 function getRandomCatGif(tipo) {
