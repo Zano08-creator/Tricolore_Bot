@@ -351,6 +351,26 @@ function getRandomSenpaiGif() {
 }
 
 // ─────────────────────────────────────────────
+//  GIF PER /catboy e /catgirl
+// ─────────────────────────────────────────────
+// 👉 METTI QUI I LINK DELLE TUE GIF. Ad ogni /catboy o /catgirl ne verrà
+// mostrata una a caso tra quelle della lista corrispondente.
+// Il link deve puntare DIRETTAMENTE al file (finire in .gif), non alla
+// pagina di Imgur. Puoi aggiungerne quante vuoi, separate da virgola.
+const CATBOY_GIFS = [
+    "https://imgur.com/a/QnMwP3T",
+];
+
+const CATGIRL_GIFS = [
+    "https://imgur.com/a/lHnQbJn",
+];
+
+function getRandomCatGif(tipo) {
+    const list = tipo === "catboy" ? CATBOY_GIFS : CATGIRL_GIFS;
+    return list[Math.floor(Math.random() * list.length)];
+}
+
+// ─────────────────────────────────────────────
 //  IMMAGINI Safebooru (rating:safe) — /waifu
 // ─────────────────────────────────────────────
 // Nota: usiamo SOLO rating:safe per stare tranquilli sui contenuti.
@@ -1029,6 +1049,14 @@ const commands = [
         .addUserOption(o => o.setName("utente").setDescription("La persona da scegliere come senpai").setRequired(true))
         .toJSON(),
     new SlashCommandBuilder()
+        .setName("catboy").setDescription("Trasforma (scherzosamente) un utente in un CatBoy")
+        .addUserOption(o => o.setName("utente").setDescription("L'utente da trasformare").setRequired(true))
+        .toJSON(),
+    new SlashCommandBuilder()
+        .setName("catgirl").setDescription("Trasforma (scherzosamente) un utente in una CatGirl")
+        .addUserOption(o => o.setName("utente").setDescription("L'utente da trasformare").setRequired(true))
+        .toJSON(),
+    new SlashCommandBuilder()
         .setName("anime").setDescription("Consiglia un anime a caso")
         .addStringOption(o =>
             o.setName("genere")
@@ -1502,6 +1530,31 @@ client.on("interactionCreate", async (interaction) => {
             .setAuthor({ name: "🎓 Nuovo senpai notato!" })
             .setDescription(`✨ **${interaction.user.username}** ha scelto **${target.username}** come suo senpai! ✨`)
             .setImage(getRandomSenpaiGif())
+            .setFooter({ text: "Tricolore Bot" })
+            .setTimestamp();
+
+        await interaction.reply({ content: `<@${target.id}>`, embeds: [embed] });
+        return;
+    }
+
+    // ── /catboy e /catgirl ─────────────────────
+    if (commandName === "catboy" || commandName === "catgirl") {
+        const target = interaction.options.getUser("utente", true);
+
+        if (target.bot) {
+            await interaction.reply({ content: "❌ Non puoi scegliere un bot!", ephemeral: true });
+            return;
+        }
+
+        const isBoy = commandName === "catboy";
+        const label = isBoy ? "CatBoy" : "CatGirl";
+        const emoji = isBoy ? "🐱" : "😺";
+
+        const embed = new EmbedBuilder()
+            .setColor(isBoy ? 0x5dade2 : 0xf78fb3)
+            .setAuthor({ name: `${emoji} Nyaa~! Trasformazione completata!` })
+            .setDescription(`✨ **${target.username}** è ufficialmente diventato/a ${isBoy ? "un" : "una"} **${label}**! ✨`)
+            .setImage(getRandomCatGif(commandName))
             .setFooter({ text: "Tricolore Bot" })
             .setTimestamp();
 
