@@ -61,6 +61,12 @@ if (!TOKEN) { console.error("[FATAL] TOKEN mancante."); process.exit(1); }
 //   perché sono server di sviluppo con uptime incostante). I nodi che non
 //   rispondono vengono semplicemente ignorati: Shoukaku/watchdog continuano
 //   a ritentare in background senza bloccare il bot.
+// - 02/11/2026: aggiunti due nodi v4 presi dalla lista community
+//   stackryze/lavalink-list: "rive" (lavalink.rive.wtf:443, SSL) e
+//   "stackryze" (188.245.207.225:2333, SENZA SSL). Non è stato possibile
+//   testarli live da qui: se uno non si connette, il watchdog lo ritenta
+//   in background senza bloccare il bot, e puoi controllare lo stato reale
+//   di ogni nodo su /health.
 //
 // L'ordine qui sotto è anche l'ordine di preferenza: ensurePlayer() e
 // getAvailableNode() scelgono il PRIMO nodo connesso trovato, quindi il
@@ -84,8 +90,8 @@ function buildNodeList() {
         );
     }
 
-    // Nodi pubblici di fallback (Lavalink v4, SSL, porta 443), in ordine di
-    // preferenza. Se uno smette di funzionare stabilmente, rimuovilo da qui
+    // Nodi pubblici di fallback (Lavalink v4), in ordine di preferenza.
+    // Se uno smette di funzionare stabilmente, rimuovilo da qui
     // o sostituiscilo (vedi nota sopra).
     nodes.push(
         // HeavenCloud (Europa per primo: latenza minore dall'Italia)
@@ -98,6 +104,9 @@ function buildNodeList() {
         { name: "nazha-sg1", url: "sg-1.nazha.online:443",     auth: "https://discord.gg/XeSCnk57ZF", secure: true },
         { name: "nazha-sg2", url: "sg-2.nazha.online:443",     auth: "https://discord.gg/XeSCnk57ZF", secure: true },
         { name: "nazha-sg3", url: "sg-3.nazha.online:443",     auth: "https://discord.gg/XeSCnk57ZF", secure: true },
+        // Lista community stackryze (nuovi, 02/11/2026)
+        { name: "rive",      url: "lavalink.rive.wtf:443",     auth: "youshallnotpass", secure: true  },
+        { name: "stackryze", url: "188.245.207.225:2333",      auth: "youshallnotpass", secure: false },
         // AjieDev (server di sviluppo: uptime meno affidabile, quindi in coda)
         { name: "ajie-v4",      url: "lava-v4.ajieblogs.eu.org:443", auth: "https://dsc.gg/ajidevserver", secure: true },
         { name: "serenetia-v4", url: "lavalinkv4.serenetia.com:443", auth: "https://dsc.gg/ajidevserver", secure: true },
@@ -367,6 +376,28 @@ const CATGIRL_GIFS = [
 
 function getRandomCatGif(tipo) {
     const list = tipo === "catboy" ? CATBOY_GIFS : CATGIRL_GIFS;
+    return list[Math.floor(Math.random() * list.length)];
+}
+
+// ─────────────────────────────────────────────
+//  GIF PER /goodboy e /goodgirl
+// ─────────────────────────────────────────────
+// 👉 METTI QUI I LINK DELLE TUE GIF. Ad ogni /goodboy o /goodgirl ne verrà
+// mostrata una a caso tra quelle della lista corrispondente.
+// Il link deve puntare DIRETTAMENTE al file (finire in .gif), non alla
+// pagina di Imgur. Puoi aggiungerne quante vuoi, separate da virgola.
+// Se la lista è vuota il comando funziona lo stesso, solo senza GIF.
+const GOODBOY_GIFS = [
+    // "https://i.imgur.com/dn1JeFC.gif",
+];
+
+const GOODGIRL_GIFS = [
+    // "https://i.imgur.com/jj5bxur.gif",
+];
+
+function getRandomGoodGif(tipo) {
+    const list = tipo === "goodboy" ? GOODBOY_GIFS : GOODGIRL_GIFS;
+    if (!list.length) return null;
     return list[Math.floor(Math.random() * list.length)];
 }
 
@@ -1057,6 +1088,14 @@ const commands = [
         .addUserOption(o => o.setName("utente").setDescription("L'utente da trasformare").setRequired(true))
         .toJSON(),
     new SlashCommandBuilder()
+        .setName("goodboy").setDescription("Dì a qualcuno che è un good boy")
+        .addUserOption(o => o.setName("utente").setDescription("Il good boy").setRequired(true))
+        .toJSON(),
+    new SlashCommandBuilder()
+        .setName("goodgirl").setDescription("Dì a qualcuna che è una good girl")
+        .addUserOption(o => o.setName("utente").setDescription("La good girl").setRequired(true))
+        .toJSON(),
+    new SlashCommandBuilder()
         .setName("anime").setDescription("Consiglia un anime a caso")
         .addStringOption(o =>
             o.setName("genere")
@@ -1557,6 +1596,33 @@ client.on("interactionCreate", async (interaction) => {
             .setImage(getRandomCatGif(commandName))
             .setFooter({ text: "Tricolore Bot" })
             .setTimestamp();
+
+        await interaction.reply({ content: `<@${target.id}>`, embeds: [embed] });
+        return;
+    }
+
+    // ── /goodboy e /goodgirl ───────────────────
+    if (commandName === "goodboy" || commandName === "goodgirl") {
+        const target = interaction.options.getUser("utente", true);
+
+        if (target.bot) {
+            await interaction.reply({ content: "❌ Non puoi scegliere un bot!", ephemeral: true });
+            return;
+        }
+
+        const isBoy = commandName === "goodboy";
+        const label = isBoy ? "good boy" : "good girl";
+        const emoji = isBoy ? "🐶" : "🐰";
+
+        const embed = new EmbedBuilder()
+            .setColor(isBoy ? 0x3498db : 0xff8fab)
+            .setAuthor({ name: `${emoji} Bravo/a! Sei un ottimo elemento!` })
+            .setDescription(`💖 **${interaction.user.username}** dice a **${target.username}**: sei un/a bravo/a **${label}**! 💖`)
+            .setFooter({ text: "Tricolore Bot" })
+            .setTimestamp();
+
+        const gif = getRandomGoodGif(commandName);
+        if (gif) embed.setImage(gif);
 
         await interaction.reply({ content: `<@${target.id}>`, embeds: [embed] });
         return;
