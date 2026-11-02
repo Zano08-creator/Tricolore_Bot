@@ -388,11 +388,11 @@ function getRandomCatGif(tipo) {
 // pagina di Imgur. Puoi aggiungerne quante vuoi, separate da virgola.
 // Se la lista è vuota il comando funziona lo stesso, solo senza GIF.
 const GOODBOY_GIFS = [
-    // "https://i.imgur.com/dn1JeFC.gif",
+    "https://i.imgur.com/dn1JeFC.gif",
 ];
 
 const GOODGIRL_GIFS = [
-    // "https://i.imgur.com/jj5bxur.gif",
+    "https://i.imgur.com/jj5bxur.gif",
 ];
 
 function getRandomGoodGif(tipo) {
